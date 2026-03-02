@@ -1,0 +1,293 @@
+defmodule BotArmyJob.ScheduleStore do
+  @moduledoc """
+  In-memory schedule storage for the Job bot.
+
+  This GenServer maintains the in-memory state of all schedules while Ecto handles
+  persistence to PostgreSQL. On init, it loads all schedules from the database.
+  Every mutation (create, update, pause, resume) is persisted to the database before updating state.
+
+  ## API
+
+  - `create/1` - Create a new schedule
+  - `update/2` - Update an existing schedule
+  - `pause/1` - Pause a schedule
+  - `resume/1` - Resume a paused schedule
+  - `get/1` - Retrieve a schedule by ID
+  - `list/0` - List all active schedules
+  - `list_all/0` - List all schedules including paused and archived
+  """
+
+  use GenServer
+  require Logger
+
+  @server __MODULE__
+
+  # API
+
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: @server)
+  end
+
+  @doc """
+  Create a new schedule from payload.
+
+  Returns `{:ok, schedule}` with the created schedule, or `{:error, reason}`.
+  """
+  def create(payload) when is_map(payload) do
+    GenServer.call(@server, {:create, payload})
+  end
+
+  @doc """
+  Update an existing schedule.
+
+  Returns `{:ok, schedule}` with the updated schedule, or `{:error, reason}`.
+  """
+  def update(schedule_id, payload) when is_binary(schedule_id) and is_map(payload) do
+    GenServer.call(@server, {:update, schedule_id, payload})
+  end
+
+  @doc """
+  Pause a schedule.
+
+  Returns `{:ok, schedule}` with the paused schedule, or `{:error, reason}`.
+  """
+  def pause(schedule_id) when is_binary(schedule_id) do
+    GenServer.call(@server, {:pause, schedule_id})
+  end
+
+  @doc """
+  Resume a paused schedule.
+
+  Returns `{:ok, schedule}` with the resumed schedule, or `{:error, reason}`.
+  """
+  def resume(schedule_id) when is_binary(schedule_id) do
+    GenServer.call(@server, {:resume, schedule_id})
+  end
+
+  @doc """
+  Retrieve a schedule by ID.
+
+  Returns `{:ok, schedule}` or `{:error, :not_found}`.
+  """
+  def get(schedule_id) when is_binary(schedule_id) do
+    GenServer.call(@server, {:get, schedule_id})
+  end
+
+  @doc """
+  List all active schedules.
+
+  Returns `{:ok, schedules}`.
+  """
+  def list do
+    GenServer.call(@server, :list)
+  end
+
+  @doc """
+  List all schedules including paused and archived.
+
+  Returns `{:ok, schedules}`.
+  """
+  def list_all do
+    GenServer.call(@server, :list_all)
+  end
+
+  @doc """
+  Clear all schedules (for testing).
+
+  Returns `:ok`.
+  """
+  def clear do
+    GenServer.call(@server, :clear)
+  end
+
+  # Callbacks
+
+  @impl true
+  def init(_opts) do
+    Logger.info("ScheduleStore started")
+    # Load all schedules from database into GenServer state
+    schedules = BotArmyJob.Repo.all(BotArmyJob.Schemas.Schedule)
+    state = Enum.reduce(schedules, %{}, fn schedule, acc ->
+      Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
+    end)
+    {:ok, state}
+  end
+
+  @impl true
+  def handle_call({:create, payload}, _from, state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset = BotArmyJob.Schemas.Schedule.changeset(
+      %BotArmyJob.Schemas.Schedule{id: schedule_id},
+      %{
+        "title" => payload["title"],
+        "description" => Map.get(payload, "description"),
+        "cron_expression" => payload["cron_expression"],
+        "command" => payload["command"],
+        "timeout" => Map.get(payload, "timeout", 3600),
+        "status" => "active"
+      }
+    )
+
+    case BotArmyJob.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        schedule = schema_to_map(db_schedule)
+        new_state = Map.put(state, schedule_id, schedule)
+        Logger.info("Created schedule in database: #{schedule_id}")
+        {:reply, {:ok, schedule}, new_state}
+
+      {:error, changeset} ->
+        Logger.error("Failed to create schedule: #{inspect(changeset.errors)}")
+        {:reply, {:error, :database_error}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:update, schedule_id, payload}, _from, state) do
+    case Map.get(state, schedule_id) do
+      nil ->
+        {:reply, {:error, :not_found}, state}
+
+      _schedule ->
+        schedule_uuid = Ecto.UUID.cast!(schedule_id)
+        db_schedule = BotArmyJob.Repo.get(BotArmyJob.Schemas.Schedule, schedule_uuid)
+
+        if db_schedule do
+          changeset = BotArmyJob.Schemas.Schedule.changeset(
+            db_schedule,
+            %{
+              "title" => Map.get(payload, "title", db_schedule.title),
+              "description" => Map.get(payload, "description", db_schedule.description),
+              "cron_expression" => Map.get(payload, "cron_expression", db_schedule.cron_expression),
+              "command" => Map.get(payload, "command", db_schedule.command),
+              "timeout" => Map.get(payload, "timeout", db_schedule.timeout)
+            }
+          )
+
+          case BotArmyJob.Repo.update(changeset) do
+            {:ok, updated_db_schedule} ->
+              updated_schedule = schema_to_map(updated_db_schedule)
+              new_state = Map.put(state, schedule_id, updated_schedule)
+              Logger.info("Updated schedule in database: #{schedule_id}")
+              {:reply, {:ok, updated_schedule}, new_state}
+
+            {:error, changeset} ->
+              Logger.error("Failed to update schedule: #{inspect(changeset.errors)}")
+              {:reply, {:error, :database_error}, state}
+          end
+        else
+          {:reply, {:error, :not_found}, state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_call({:pause, schedule_id}, _from, state) do
+    case Map.get(state, schedule_id) do
+      nil ->
+        {:reply, {:error, :not_found}, state}
+
+      _schedule ->
+        schedule_uuid = Ecto.UUID.cast!(schedule_id)
+        db_schedule = BotArmyJob.Repo.get(BotArmyJob.Schemas.Schedule, schedule_uuid)
+
+        if db_schedule do
+          changeset = BotArmyJob.Schemas.Schedule.changeset(
+            db_schedule,
+            %{"status" => "paused"}
+          )
+
+          case BotArmyJob.Repo.update(changeset) do
+            {:ok, paused_db_schedule} ->
+              paused_schedule = schema_to_map(paused_db_schedule)
+              new_state = Map.put(state, schedule_id, paused_schedule)
+              Logger.info("Paused schedule in database: #{schedule_id}")
+              {:reply, {:ok, paused_schedule}, new_state}
+
+            {:error, changeset} ->
+              Logger.error("Failed to pause schedule: #{inspect(changeset.errors)}")
+              {:reply, {:error, :database_error}, state}
+          end
+        else
+          {:reply, {:error, :not_found}, state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_call({:resume, schedule_id}, _from, state) do
+    case Map.get(state, schedule_id) do
+      nil ->
+        {:reply, {:error, :not_found}, state}
+
+      _schedule ->
+        schedule_uuid = Ecto.UUID.cast!(schedule_id)
+        db_schedule = BotArmyJob.Repo.get(BotArmyJob.Schemas.Schedule, schedule_uuid)
+
+        if db_schedule do
+          changeset = BotArmyJob.Schemas.Schedule.changeset(
+            db_schedule,
+            %{"status" => "active"}
+          )
+
+          case BotArmyJob.Repo.update(changeset) do
+            {:ok, resumed_db_schedule} ->
+              resumed_schedule = schema_to_map(resumed_db_schedule)
+              new_state = Map.put(state, schedule_id, resumed_schedule)
+              Logger.info("Resumed schedule in database: #{schedule_id}")
+              {:reply, {:ok, resumed_schedule}, new_state}
+
+            {:error, changeset} ->
+              Logger.error("Failed to resume schedule: #{inspect(changeset.errors)}")
+              {:reply, {:error, :database_error}, state}
+          end
+        else
+          {:reply, {:error, :not_found}, state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_call({:get, schedule_id}, _from, state) do
+    case Map.get(state, schedule_id) do
+      nil -> {:reply, {:error, :not_found}, state}
+      schedule -> {:reply, {:ok, schedule}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:list, _from, state) do
+    schedules = state
+      |> Map.values()
+      |> Enum.filter(fn s -> s["status"] == "active" end)
+    {:reply, {:ok, schedules}, state}
+  end
+
+  @impl true
+  def handle_call(:list_all, _from, state) do
+    schedules = Map.values(state)
+    {:reply, {:ok, schedules}, state}
+  end
+
+  @impl true
+  def handle_call(:clear, _from, _state) do
+    Logger.debug("Clearing all schedules")
+    {:reply, :ok, %{}}
+  end
+
+  # Helper function to convert Ecto schema to map for GenServer state
+  defp schema_to_map(%BotArmyJob.Schemas.Schedule{} = schedule) do
+    %{
+      "id" => Ecto.UUID.cast!(schedule.id) |> to_string(),
+      "title" => schedule.title,
+      "description" => schedule.description,
+      "cron_expression" => schedule.cron_expression,
+      "command" => schedule.command,
+      "timeout" => schedule.timeout,
+      "status" => schedule.status,
+      "last_run_at" => if(schedule.last_run_at, do: schedule.last_run_at |> NaiveDateTime.to_iso8601(), else: nil),
+      "created_at" => schedule.inserted_at |> NaiveDateTime.to_iso8601(),
+      "updated_at" => schedule.updated_at |> NaiveDateTime.to_iso8601()
+    }
+  end
+end
