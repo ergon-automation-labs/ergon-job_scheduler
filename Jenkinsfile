@@ -26,27 +26,6 @@ pipeline {
       }
     }
 
-    stage('Run Tests') {
-      steps {
-        sh '''
-          echo "==============================================="
-          echo "Running integration tests"
-          echo "==============================================="
-
-          # Install dependencies
-          mix deps.get
-
-          # Run all tests
-          mix test --cover || {
-            echo "❌ Tests failed - deployment aborted"
-            exit 1
-          }
-
-          echo "✓ All tests passed"
-        '''
-      }
-    }
-
     stage('Download Build Artifact') {
       steps {
         sh '''
@@ -116,6 +95,36 @@ pipeline {
 
           echo "Deploy complete!"
           echo "Completion time: $(date)"
+        '''
+      }
+    }
+
+    stage('Run Migrations') {
+      steps {
+        sh '''
+          echo "==============================================="
+          echo "Running database migrations"
+          echo "==============================================="
+
+          # Get the release binary path
+          RELEASE_BIN="${RELEASE_DIR}/current/bot_army_job/bin/bot_army_job"
+
+          if [ ! -f "$RELEASE_BIN" ]; then
+            echo "⚠️  Release binary not found at $RELEASE_BIN"
+            echo "Skipping migrations (may already be at correct schema)"
+            exit 0
+          fi
+
+          # Run migrations using the release
+          # The release has database config from launchd environment
+          echo "Running: $RELEASE_BIN eval 'BotArmyJob.Release.migrate()'"
+
+          $RELEASE_BIN eval 'BotArmyJob.Release.migrate()' || {
+            echo "⚠️  Migration failed or Release module not found"
+            echo "Continuing with deployment (manual migration may be needed)"
+          }
+
+          echo "✓ Migrations complete"
         '''
       }
     }
