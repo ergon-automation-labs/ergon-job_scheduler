@@ -1,4 +1,5 @@
 pipeline {
+  // Download releases from GitHub and deploy them
   agent { label 'built-in' }
 
   options {
@@ -6,10 +7,15 @@ pipeline {
     timestamps()
   }
 
+  triggers {
+    // Poll GitHub every 5 minutes for new commits
+    pollSCM('H/5 * * * *')
+  }
+
   environment {
-    MIX_ENV = 'prod'
     BOT_NAME = 'job_bot'
     RELEASE_DIR = "/opt/ergon/releases/${BOT_NAME}"
+    GITHUB_REPO = "ergon-automation-labs/ergon-job"
   }
 
   stages {
@@ -17,32 +23,67 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
-        sh '''
-          echo "Cloning dependency repositories..."
-          cd ..
-          [ -d bot_army_core ] || git clone https://github.com/ergon-automation-labs/ergon-core.git bot_army_core
-          [ -d bot_army_runtime ] || git clone https://github.com/ergon-automation-labs/ergon-runtime.git bot_army_runtime
-        '''
       }
     }
 
-    stage('Test') {
+    stage('Run Tests') {
       steps {
         sh '''
-          echo "Installing dependencies..."
+          echo "==============================================="
+          echo "Running integration tests"
+          echo "==============================================="
+
+          # Install dependencies
           mix deps.get
-          echo "Running tests..."
-          mix test
+
+          # Run all tests
+          mix test --cover || {
+            echo "❌ Tests failed - deployment aborted"
+            exit 1
+          }
+
+          echo "✓ All tests passed"
         '''
       }
     }
 
-    stage('Build Release') {
+    stage('Download Build Artifact') {
       steps {
         sh '''
-          echo "Building OTP release..."
-          mix deps.get --only prod
-          mix release --overwrite
+          echo "==============================================="
+          echo "Downloading pre-built release from GitHub"
+          echo "==============================================="
+
+          # Get the latest published release (not a draft)
+          LATEST_RELEASE=$(gh api repos/${GITHUB_REPO}/releases \
+            -q '.[] | select(.draft==false) | .tag_name' | head -1)
+
+          if [ -z "$LATEST_RELEASE" ]; then
+            echo "ERROR: No published release found on GitHub"
+            exit 1
+          fi
+
+          echo "Latest release: $LATEST_RELEASE"
+
+          # Download the tarball asset
+          echo "Downloading: ${BOT_NAME}-*.tar.gz"
+          mkdir -p ./release-artifact
+
+          gh release download $LATEST_RELEASE \
+            --repo ${GITHUB_REPO} \
+            --pattern "*.tar.gz" \
+            -D ./release-artifact
+
+          echo "✓ Release downloaded successfully"
+
+          # Extract tarball
+          cd ./release-artifact
+          TARBALL=$(ls -1 *.tar.gz | head -1)
+          echo "Extracting: $TARBALL"
+          tar -xzf "$TARBALL"
+          rm "$TARBALL"
+          ls -la
+          cd ..
         '''
       }
     }
@@ -50,6 +91,11 @@ pipeline {
     stage('Deploy') {
       steps {
         sh '''
+          echo "==============================================="
+          echo "Deploying release"
+          echo "==============================================="
+          echo "Start time: $(date)"
+
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           DEST="${RELEASE_DIR}/releases/${TIMESTAMP}"
 
@@ -57,7 +103,7 @@ pipeline {
           mkdir -p "${DEST}"
 
           echo "Copying release artifacts..."
-          cp -r _build/prod/rel/${BOT_NAME}/* "${DEST}/"
+          cp -r ./release-artifact/* "${DEST}/"
 
           echo "Updating current symlink..."
           ln -sfn "${DEST}" "${RELEASE_DIR}/current"
@@ -69,6 +115,7 @@ pipeline {
           sleep 5
 
           echo "Deploy complete!"
+          echo "Completion time: $(date)"
         '''
       }
     }
@@ -78,16 +125,34 @@ pipeline {
   post {
     success {
       sh '''
-        VERSION=$(cat _build/prod/rel/${BOT_NAME}/releases/RELEASES | tail -1 | cut -d' ' -f2)
-        /opt/bot_army/scripts/nats_publish.sh ops.deploy.complete \
-          "{\"bot\":\"${BOT_NAME}\",\"node\":\"air\",\"triggered_by\":\"jenkins\",\"status\":\"success\",\"version\":\"${VERSION}\"}"
+        # Extract version from the deployed release
+        if [ -f ./release-artifact/bot_army_job/releases/start_erl.data ]; then
+          VERSION=$(awk '{print $2}' ./release-artifact/bot_army_job/releases/start_erl.data)
+        fi
+        VERSION=${VERSION:-"0.1.0"}
+
+        # Build JSON payload with proper formatting
+        PAYLOAD=$(cat <<EOF
+{"bot":"${BOT_NAME}","node":"air","triggered_by":"jenkins","status":"success","version":"${VERSION}"}
+EOF
+)
+        echo "📢 Notifying NATS of successful deployment..."
+        /opt/bot_army/scripts/nats_publish.sh ops.deploy.complete "$PAYLOAD" || echo "⚠️  NATS notification failed (non-blocking)"
       '''
     }
     failure {
       sh '''
-        /opt/bot_army/scripts/nats_publish.sh ops.deploy.failed \
-          "{\"bot\":\"${BOT_NAME}\",\"node\":\"air\",\"triggered_by\":\"jenkins\",\"status\":\"failed\"}"
+        # Build JSON payload for failure
+        PAYLOAD=$(cat <<EOF
+{"bot":"${BOT_NAME}","node":"air","triggered_by":"jenkins","status":"failed"}
+EOF
+)
+        echo "📢 Notifying NATS of failed deployment..."
+        /opt/bot_army/scripts/nats_publish.sh ops.deploy.failed "$PAYLOAD" || echo "⚠️  NATS notification failed (non-blocking)"
       '''
+    }
+    always {
+      cleanWs()
     }
   }
 }

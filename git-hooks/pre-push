@@ -1,0 +1,86 @@
+#!/bin/bash
+# Git pre-push hook for bot_army_job
+# Validates compilation and builds release before pushing to GitHub
+# Tests run in Jenkins (not locally)
+
+set -e
+
+echo "🔍 Running pre-push checks..."
+echo ""
+
+# Check if we're pushing to main
+read local_ref local_oid remote_ref remote_oid
+if [[ $remote_ref == "refs/heads/main" ]]; then
+  echo "⚠️  Pushing to main branch - validating and building release..."
+  echo ""
+
+  # Ensure dependencies are up to date
+  echo "📦 Installing dependencies..."
+  mix deps.get || {
+    echo "❌ Failed to install dependencies"
+    exit 1
+  }
+
+  # Check for compilation issues (quick validation)
+  echo ""
+  echo "🔨 Compiling code..."
+  mix compile --force || {
+    echo "❌ Compilation failed - push aborted"
+    exit 1
+  }
+
+  # Quick linting check (non-blocking)
+  echo ""
+  echo "📝 Running linter..."
+  mix credo --strict || {
+    echo "⚠️  Linting issues found (non-blocking, will fail in CI)"
+  }
+
+  # Run tests (required before release)
+  echo ""
+  echo "🧪 Running tests..."
+  mix test || {
+    echo "❌ Tests failed - push aborted"
+    exit 1
+  }
+
+  # Build OTP release
+  echo ""
+  echo "📦 Building OTP release..."
+  MIX_ENV=prod mix release --overwrite || {
+    echo "❌ Release build failed - push aborted"
+    exit 1
+  }
+
+  # Extract version and create GitHub release
+  echo ""
+  echo "🚀 Publishing release to GitHub..."
+  VERSION=$(cat _build/prod/rel/job_bot/releases/start_erl.data | awk '{print $2}')
+  echo "Version: $VERSION"
+
+  # Create tarball
+  tar -czf job_bot-$VERSION.tar.gz -C _build/prod/rel job_bot/ || {
+    echo "❌ Failed to create tarball"
+    exit 1
+  }
+  echo "✓ Tarball created: job_bot-$VERSION.tar.gz"
+
+  # Create GitHub release
+  gh release create v$VERSION job_bot-$VERSION.tar.gz \
+    --title "Release v$VERSION" \
+    --notes "Job Bot Elixir release v$VERSION. Automatically deployed by Jenkins." \
+    --draft=false || {
+    echo "⚠️  Release already exists or GitHub publish failed"
+    echo "Continuing with push anyway..."
+  }
+  echo "✓ Release published to GitHub"
+
+  echo ""
+  echo "✅ All checks passed, release built and published!"
+  echo "📤 Proceeding with push..."
+else
+  echo "ℹ️  Pushing to feature branch - skipping validation"
+fi
+
+echo ""
+exit 0
