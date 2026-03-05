@@ -1,11 +1,15 @@
-.PHONY: setup help deps test credo dialyzer coverage check format clean release publish-release setup-hooks
+.PHONY: setup help deps test credo dialyzer coverage check format clean release publish-release setup-hooks setup-db reset-db
 
 help:
 	@echo "BotArmyJob - Job Scheduling Bot"
 	@echo ""
-	@echo "Available commands:"
-	@echo "  make setup           - Set up project (deps.get + install git hooks)"
+	@echo "Setup commands:"
+	@echo "  make setup           - Set up project (deps.get + install git hooks + setup database)"
 	@echo "  make setup-hooks     - Install git hooks for pre-push validation"
+	@echo "  make setup-db        - Create and migrate test database (required for testing)"
+	@echo "  make reset-db        - Drop and recreate test database (useful for troubleshooting)"
+	@echo ""
+	@echo "Development commands:"
 	@echo "  make test            - Run all tests"
 	@echo "  make credo           - Run linter"
 	@echo "  make dialyzer        - Run static analysis"
@@ -22,12 +26,31 @@ help:
 	@echo "  git push             - Pre-push hook validates, builds, and publishes automatically"
 	@echo ""
 
-setup: init deps setup-hooks
-	@echo "Setup complete."
+setup: init deps setup-hooks setup-db
+	@echo "✓ Setup complete!"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Configure .env with your database settings (if needed)"
+	@echo "  2. Run: make test"
+	@echo "  3. Start developing!"
+	@echo ""
 
 setup-hooks:
 	@git config core.hooksPath git-hooks
 	@echo "✓ Git hooks installed (core.hooksPath = git-hooks)"
+
+setup-db:
+	@echo "Setting up test database..."
+	@MIX_ENV=test mix ecto.create || true
+	@MIX_ENV=test mix ecto.migrate
+	@echo "✓ Test database created and migrations applied"
+
+reset-db:
+	@echo "⚠️  Resetting test database (dropping and recreating)..."
+	@MIX_ENV=test mix ecto.drop || true
+	@MIX_ENV=test mix ecto.create
+	@MIX_ENV=test mix ecto.migrate
+	@echo "✓ Test database reset complete"
 
 init:
 	@if [ ! -d .git ]; then git init; echo "Git initialized."; else echo "Git already initialized."; fi
