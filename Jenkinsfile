@@ -17,6 +17,12 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
+        sh '''
+          echo "Cloning dependency repositories..."
+          cd ..
+          [ -d bot_army_core ] || git clone https://github.com/ergon-automation-labs/ergon-core.git bot_army_core
+          [ -d bot_army_runtime ] || git clone https://github.com/ergon-automation-labs/ergon-runtime.git bot_army_runtime
+        '''
       }
     }
 
