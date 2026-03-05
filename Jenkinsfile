@@ -90,8 +90,8 @@ pipeline {
           echo "Restarting service..."
           launchctl kickstart -k system/com.botarmy.${BOT_NAME} || launchctl load /Library/LaunchDaemons/com.botarmy.${BOT_NAME}.plist
 
-          echo "Waiting for service to stabilize..."
-          sleep 5
+          echo "Checking service health..."
+          /opt/bot_army/scripts/health_check.sh ${BOT_NAME}
 
           echo "Deploy complete!"
           echo "Completion time: $(date)"
@@ -140,13 +140,17 @@ pipeline {
         fi
         VERSION=${VERSION:-"0.1.0"}
 
-        # Build JSON payload with proper formatting
+        # Extract release timestamp and git SHA
+        TIMESTAMP=$(basename $(readlink "${RELEASE_DIR}/current"))
+        GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+        # Build richer JSON payload
         PAYLOAD=$(cat <<EOF
-{"bot":"${BOT_NAME}","node":"air","triggered_by":"jenkins","status":"success","version":"${VERSION}"}
+{"bot":"${BOT_NAME}","node":"air","triggered_by":"jenkins","status":"success","version":"${VERSION}","release":"${TIMESTAMP}","sha":"${GIT_SHA}"}
 EOF
 )
         echo "📢 Notifying NATS of successful deployment..."
-        /opt/bot_army/scripts/nats_publish.sh ops.deploy.complete "$PAYLOAD" || echo "⚠️  NATS notification failed (non-blocking)"
+        /opt/bot_army/scripts/nats_publish.sh ops.builds.${BOT_NAME} "$PAYLOAD" || echo "⚠️  NATS notification failed (non-blocking)"
       '''
     }
     failure {
@@ -157,7 +161,7 @@ EOF
 EOF
 )
         echo "📢 Notifying NATS of failed deployment..."
-        /opt/bot_army/scripts/nats_publish.sh ops.deploy.failed "$PAYLOAD" || echo "⚠️  NATS notification failed (non-blocking)"
+        /opt/bot_army/scripts/nats_publish.sh ops.builds.${BOT_NAME} "$PAYLOAD" || echo "⚠️  NATS notification failed (non-blocking)"
       '''
     }
     always {
