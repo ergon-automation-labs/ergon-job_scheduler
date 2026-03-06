@@ -106,10 +106,17 @@ defmodule BotArmyJob.ScheduleStore do
   def init(_opts) do
     Logger.info("ScheduleStore started")
     # Load all schedules from database into GenServer state
-    schedules = BotArmyJob.Repo.all(BotArmyJob.Schemas.Schedule)
-    state = Enum.reduce(schedules, %{}, fn schedule, acc ->
-      Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
-    end)
+    # Gracefully handle database unavailability (e.g., in tests)
+    state = try do
+      schedules = BotArmyJob.Repo.all(BotArmyJob.Schemas.Schedule)
+      Enum.reduce(schedules, %{}, fn schedule, acc ->
+        Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
+      end)
+    rescue
+      _ ->
+        Logger.warning("Could not load schedules from database (database unavailable). Starting with empty state.")
+        %{}
+    end
     {:ok, state}
   end
 
