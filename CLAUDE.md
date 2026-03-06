@@ -113,3 +113,46 @@ Deployment happens after:
 - `bot_army_schemas_job` - Job message schemas
 - `bot_army_core` - Core library and NATS decoder
 - `bot_army_infra` - Deployment infrastructure
+
+---
+
+## Agent Workflow Pattern
+
+**Effective use of Claude Code agents when developing this bot.**
+
+This follows the polyrepo agent strategy documented in `bot_army_infra/CLAUDE.md`.
+
+### When to Use Haiku Agents
+
+- Exploring handler implementations and understanding existing patterns
+- Reading test files to understand expected behavior
+- Diagnostics: checking test failures, understanding error logs
+- Code search: finding specific handlers or NATS subjects
+- Verification: running tests, checking message flow
+
+**Why**: Fast iteration loop, perfect for understanding how other bots are structured.
+
+### When to Use Sonnet Agents
+
+- Implementing new handlers or business logic
+- Designing complex scheduling algorithms and execution strategies
+- Multi-handler integrations and message routing
+- Refactoring handlers for new requirements
+- Performance optimizations
+
+**Why**: Deep reasoning ensures handlers are correct, scheduling logic is sound, and error cases are handled.
+
+### Example: Add New Job Execution Strategy
+
+```
+User: "Add parallel job execution with dependency tracking"
+  ↓
+1. Haiku (Explore): Read existing execution_handler.ex, understand current execution model
+  ↓
+2. Sonnet (Plan): Design parallel execution strategy, identify state changes needed
+   Plan dependency graph resolution, failure handling
+  ↓
+3. Sonnet (Implement): Update execution handler, add dependency tracking, add tests
+  ↓
+4. Haiku (Verify): Run test suite, check message flow and timing
+```
