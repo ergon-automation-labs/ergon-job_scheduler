@@ -14,6 +14,7 @@ pipeline {
 
   environment {
     BOT_NAME = 'job_bot'
+    STATE_NAME = 'job_bot'
     RELEASE_DIR = "/opt/ergon/releases/${BOT_NAME}"
     GITHUB_REPO = "ergon-automation-labs/ergon-job"
   }
@@ -87,8 +88,8 @@ pipeline {
           echo "Updating current symlink..."
           ln -sfn "${DEST}" "${RELEASE_DIR}/current"
 
-          echo "Restarting service..."
-          launchctl kickstart -k system/com.botarmy.${BOT_NAME} || launchctl load /Library/LaunchDaemons/com.botarmy.${BOT_NAME}.plist
+          echo "Deploying service via Salt..."
+          sudo /opt/salt/salt-call --local state.apply bots.${STATE_NAME}
 
           echo "Checking service health..."
           /opt/bot_army/scripts/health_check.sh ${BOT_NAME}
