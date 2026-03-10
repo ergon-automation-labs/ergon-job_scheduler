@@ -1,7 +1,10 @@
 import Config
 
-# Test against Kubernetes PostgreSQL (via NodePort)
-# Uses same configuration as production, just with test database
+# Test configuration uses mocks instead of real database
+config :bot_army_job,
+  schedule_store: BotArmyJob.ScheduleStoreMock
+
+# Real database config (for integration tests only if needed)
 config :bot_army_job, BotArmyJob.Repo,
   database: System.get_env("BOT_ARMY_JOB_TEST_DB_NAME", "ergon_job_test"),
   hostname: System.get_env("BOT_ARMY_JOB_DB_HOST", "localhost"),
