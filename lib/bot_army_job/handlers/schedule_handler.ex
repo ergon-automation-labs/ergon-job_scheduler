@@ -30,7 +30,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
 
     case validate_create_payload(payload) do
       :ok ->
-        case BotArmyJob.ScheduleStore.create(payload) do
+        case schedule_store().create(payload) do
           {:ok, schedule} ->
             Logger.info("Job schedule created: schedule_id=#{schedule["id"]}, event_id=#{event_id}")
             publish_event("job.scheduled", payload, schedule, event_id, message)
@@ -59,7 +59,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
       :ok ->
         schedule_id = payload["schedule_id"]
 
-        case BotArmyJob.ScheduleStore.update(schedule_id, payload) do
+        case schedule_store().update(schedule_id, payload) do
           {:ok, schedule} ->
             Logger.info("Job schedule updated: schedule_id=#{schedule_id}, event_id=#{event_id}")
             publish_event("job.schedule.updated", payload, schedule, event_id, message)
@@ -76,6 +76,10 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
   end
 
   # Private functions
+
+  defp schedule_store do
+    Application.get_env(:bot_army_job, :schedule_store, BotArmyJob.ScheduleStore)
+  end
 
   defp validate_create_payload(payload) when is_map(payload) do
     with :ok <- require_field(payload, "job_name"),

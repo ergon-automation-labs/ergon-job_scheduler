@@ -20,6 +20,8 @@ defmodule BotArmyJob.ScheduleStore do
   use GenServer
   require Logger
 
+  @behaviour BotArmyJob.ScheduleStoreBehaviour
+
   @server __MODULE__
 
   # API

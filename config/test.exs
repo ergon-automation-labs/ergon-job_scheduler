@@ -1,8 +1,7 @@
 import Config
 
 # Test configuration uses mocks instead of real database
-config :bot_army_job,
-  schedule_store: BotArmyJob.ScheduleStoreMock
+config :bot_army_job, :schedule_store, BotArmyJob.ScheduleStoreMock
 
 # Real database config (for integration tests only if needed)
 config :bot_army_job, BotArmyJob.Repo,

@@ -11,3 +11,8 @@ config :bot_army_job, BotArmyJob.Repo,
   username: System.get_env("BOT_ARMY_JOB_DB_USER", "postgres"),
   password: System.get_env("BOT_ARMY_JOB_DB_PASSWORD", "postgres"),
   pool_size: 10
+
+# Import environment-specific config
+if File.exists?("config/#{Mix.env()}.exs") do
+  import_config "#{Mix.env()}.exs"
+end

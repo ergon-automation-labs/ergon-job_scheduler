@@ -12,18 +12,28 @@ defmodule BotArmyJob.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      # Database connection
-      BotArmyJob.Repo,
-
-      # Job schedule storage
-      {BotArmyJob.ScheduleStore, []},
-
-      # NATS connection and consumer
-      {BotArmyJob.NATS.Consumer, []}
-    ]
+    children = []
+    |> maybe_add_repo()
+    |> maybe_add_schedule_store()
+    |> maybe_add_consumer()
 
     opts = [strategy: :one_for_one, name: BotArmyJob.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp maybe_add_repo(children) do
+    if Mix.env() == :test, do: children, else: [BotArmyJob.Repo | children]
+  end
+
+  defp maybe_add_schedule_store(children) do
+    if Application.get_env(:bot_army_job, :schedule_store) == BotArmyJob.ScheduleStore do
+      [{BotArmyJob.ScheduleStore, []} | children]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_consumer(children) do
+    if Mix.env() == :test, do: children, else: [{BotArmyJob.NATS.Consumer, []} | children]
   end
 end
