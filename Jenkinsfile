@@ -89,6 +89,10 @@ pipeline {
           ln -sfn "${DEST}" "${RELEASE_DIR}/current"
 
           echo "Deploying service via Salt..."
+          # Apply dependencies first (common.core and common.schemas are included by bot states)
+          sudo /opt/salt/salt-call --local state.apply common.core
+          sudo /opt/salt/salt-call --local state.apply common.schemas
+          # Then apply the bot state
           sudo /opt/salt/salt-call --local state.apply bots.${STATE_NAME}
 
           echo "Checking service health..."
