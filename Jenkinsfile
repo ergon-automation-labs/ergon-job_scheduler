@@ -17,6 +17,7 @@ pipeline {
     STATE_NAME = 'job_bot'
     RELEASE_DIR = "/opt/ergon/releases/${BOT_NAME}"
     GITHUB_REPO = "ergon-automation-labs/ergon-job"
+    SALT_TARGET = '-G bot_army_node_type:air'
   }
 
   stages {
@@ -90,10 +91,10 @@ pipeline {
 
           echo "Deploying service via Salt..."
           # Apply dependencies first (common.core and common.schemas are included by bot states)
-          sudo /opt/salt/salt-call --local state.apply common.core
-          sudo /opt/salt/salt-call --local state.apply common.schemas
+          sudo /opt/salt/salt ${SALT_TARGET} state.apply common.core
+          sudo /opt/salt/salt ${SALT_TARGET} state.apply common.schemas
           # Then apply the bot state
-          sudo /opt/salt/salt-call --local state.apply bots.${STATE_NAME}
+          sudo /opt/salt/salt ${SALT_TARGET} state.apply bots.${STATE_NAME}
 
           echo "Checking service health..."
           /opt/bot_army/scripts/health_check.sh ${BOT_NAME}
