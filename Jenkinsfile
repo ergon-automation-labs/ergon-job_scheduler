@@ -105,6 +105,11 @@ pipeline {
           # Then apply the bot state
           salt_apply bots.${STATE_NAME}
 
+          echo "Restarting service to pick up new release..."
+          sudo launchctl unload /Library/LaunchDaemons/com.botarmy.${BOT_NAME}.plist 2>/dev/null || true
+          sleep 2
+          sudo launchctl load -w /Library/LaunchDaemons/com.botarmy.${BOT_NAME}.plist
+
           echo "Checking service health..."
           /opt/bot_army/scripts/health_check.sh ${BOT_NAME}
 
