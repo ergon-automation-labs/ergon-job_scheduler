@@ -10,6 +10,8 @@ defmodule BotArmyJob.Application do
 
   use Application
 
+  @env Mix.env()
+
   @impl true
   def start(_type, _args) do
     children = []
@@ -22,18 +24,14 @@ defmodule BotArmyJob.Application do
   end
 
   defp maybe_add_repo(children) do
-    if Mix.env() == :test, do: children, else: [BotArmyJob.Repo | children]
+    if @env == :test, do: children, else: [BotArmyJob.Repo | children]
   end
 
   defp maybe_add_schedule_store(children) do
-    if Application.get_env(:bot_army_job, :schedule_store) == BotArmyJob.ScheduleStore do
-      [{BotArmyJob.ScheduleStore, []} | children]
-    else
-      children
-    end
+    if @env == :test, do: children, else: [{BotArmyJob.ScheduleStore, []} | children]
   end
 
   defp maybe_add_consumer(children) do
-    if Mix.env() == :test, do: children, else: [{BotArmyJob.NATS.Consumer, []} | children]
+    if @env == :test, do: children, else: [{BotArmyJob.NATS.Consumer, []} | children]
   end
 end

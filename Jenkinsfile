@@ -90,11 +90,20 @@ pipeline {
           ln -sfn "${DEST}" "${RELEASE_DIR}/current"
 
           echo "Deploying service via Salt..."
+          salt_apply() {
+            local state=$1 attempt=0
+            until sudo /opt/salt/salt ${SALT_TARGET} state.apply $state; do
+              attempt=$((attempt + 1))
+              if [ $attempt -ge 3 ]; then echo "salt state.apply $state failed after 3 attempts"; return 1; fi
+              echo "Salt busy, retrying in 30s... (attempt $attempt/3)"
+              sleep 30
+            done
+          }
           # Apply dependencies first (common.core and common.schemas are included by bot states)
-          sudo /opt/salt/salt ${SALT_TARGET} state.apply common.core
-          sudo /opt/salt/salt ${SALT_TARGET} state.apply common.schemas
+          salt_apply common.core
+          salt_apply common.schemas
           # Then apply the bot state
-          sudo /opt/salt/salt ${SALT_TARGET} state.apply bots.${STATE_NAME}
+          salt_apply bots.${STATE_NAME}
 
           echo "Checking service health..."
           /opt/bot_army/scripts/health_check.sh ${BOT_NAME}
