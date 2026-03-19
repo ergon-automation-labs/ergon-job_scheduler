@@ -67,7 +67,7 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
   echo "✓ Tarball created: $BOT_NAME-$VERSION.tar.gz"
 
   gh release create "v$VERSION" "_build/prod/rel/$BOT_NAME-$VERSION.tar.gz" \
-    --repo "ergon-automation-labs/ergon-job-scheduler" \
+    --repo "ergon-automation-labs/ergon-job" \
     --title "Release v$VERSION" \
     --notes "Job Scheduler Elixir release v$VERSION. Deployed by Jenkins." \
     --draft=false || {
