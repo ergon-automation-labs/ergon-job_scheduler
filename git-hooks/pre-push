@@ -59,7 +59,7 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
   echo "Version: $VERSION"
 
   cd _build/prod/rel
-  tar -czf "$BOT_NAME-$VERSION.tar.gz" -C "$RELEASE_NAME" . || {
+  tar -czf "$BOT_NAME-$VERSION.tar.gz" "$RELEASE_NAME" || {
     echo "❌ Failed to create tarball"
     exit 1
   }

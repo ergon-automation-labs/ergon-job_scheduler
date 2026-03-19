@@ -102,9 +102,9 @@ publish-release: release
 	VERSION=$$(grep 'version:' mix.exs | head -1 | sed 's/.*version: "\([^"]*\)".*/\1/'); \
 	echo "Version: $$VERSION"; \
 	\
-	# Create tarball with flat structure
+	# Create tarball with nested structure
 	echo "Creating release tarball..."; \
-	cd _build/prod/rel && tar -czf job_scheduler-$$VERSION.tar.gz -C job_scheduler . && cd - > /dev/null; \
+	cd _build/prod/rel && tar -czf job_scheduler-$$VERSION.tar.gz job_scheduler && cd - > /dev/null; \
 	echo "✓ Tarball created: _build/prod/rel/job_scheduler-$$VERSION.tar.gz"; \
 	echo ""; \
 	\
@@ -140,8 +140,8 @@ deploy: release
 	echo "Deploying to: $$DEST"; \
 	mkdir -p "$$DEST"; \
 	\
-	# Extract tarball
-	cd _build/prod/rel && tar -xzf job_scheduler-$$VERSION.tar.gz -C "$$DEST" && cd - > /dev/null; \
+	# Extract tarball (creates job_scheduler/ subdirectory)
+	tar -xzf _build/prod/rel/job_scheduler-$$VERSION.tar.gz -C /opt/ergon/releases/job_scheduler/releases/$$TIMESTAMP; \
 	\
 	# Update symlink
 	ln -sfn "$$DEST" /opt/ergon/releases/job_scheduler/current; \
