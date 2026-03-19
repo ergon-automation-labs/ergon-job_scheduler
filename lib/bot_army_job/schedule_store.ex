@@ -1,4 +1,4 @@
-defmodule BotArmyJob.ScheduleStore do
+defmodule BotArmyJobScheduler.ScheduleStore do
   @moduledoc """
   In-memory schedule storage for the Job bot.
 
@@ -20,7 +20,7 @@ defmodule BotArmyJob.ScheduleStore do
   use GenServer
   require Logger
 
-  @behaviour BotArmyJob.ScheduleStoreBehaviour
+  @behaviour BotArmyJobScheduler.ScheduleStoreBehaviour
 
   @server __MODULE__
 
@@ -110,7 +110,7 @@ defmodule BotArmyJob.ScheduleStore do
     # Load all schedules from database into GenServer state
     # Gracefully handle database unavailability (e.g., in tests)
     state = try do
-      schedules = BotArmyJob.Repo.all(BotArmyJob.Schemas.Schedule)
+      schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
       Enum.reduce(schedules, %{}, fn schedule, acc ->
         Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
       end)
@@ -126,8 +126,8 @@ defmodule BotArmyJob.ScheduleStore do
   def handle_call({:create, payload}, _from, state) do
     schedule_id = Ecto.UUID.generate()
 
-    changeset = BotArmyJob.Schemas.Schedule.changeset(
-      %BotArmyJob.Schemas.Schedule{id: schedule_id},
+    changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
+      %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
       %{
         "title" => payload["title"],
         "description" => Map.get(payload, "description"),
@@ -138,7 +138,7 @@ defmodule BotArmyJob.ScheduleStore do
       }
     )
 
-    case BotArmyJob.Repo.insert(changeset) do
+    case BotArmyJobScheduler.Repo.insert(changeset) do
       {:ok, db_schedule} ->
         schedule = schema_to_map(db_schedule)
         new_state = Map.put(state, schedule_id, schedule)
@@ -159,10 +159,10 @@ defmodule BotArmyJob.ScheduleStore do
 
       _schedule ->
         schedule_uuid = Ecto.UUID.cast!(schedule_id)
-        db_schedule = BotArmyJob.Repo.get(BotArmyJob.Schemas.Schedule, schedule_uuid)
+        db_schedule = BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
 
         if db_schedule do
-          changeset = BotArmyJob.Schemas.Schedule.changeset(
+          changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
             db_schedule,
             %{
               "title" => Map.get(payload, "title", db_schedule.title),
@@ -173,7 +173,7 @@ defmodule BotArmyJob.ScheduleStore do
             }
           )
 
-          case BotArmyJob.Repo.update(changeset) do
+          case BotArmyJobScheduler.Repo.update(changeset) do
             {:ok, updated_db_schedule} ->
               updated_schedule = schema_to_map(updated_db_schedule)
               new_state = Map.put(state, schedule_id, updated_schedule)
@@ -198,15 +198,15 @@ defmodule BotArmyJob.ScheduleStore do
 
       _schedule ->
         schedule_uuid = Ecto.UUID.cast!(schedule_id)
-        db_schedule = BotArmyJob.Repo.get(BotArmyJob.Schemas.Schedule, schedule_uuid)
+        db_schedule = BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
 
         if db_schedule do
-          changeset = BotArmyJob.Schemas.Schedule.changeset(
+          changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
             db_schedule,
             %{"status" => "paused"}
           )
 
-          case BotArmyJob.Repo.update(changeset) do
+          case BotArmyJobScheduler.Repo.update(changeset) do
             {:ok, paused_db_schedule} ->
               paused_schedule = schema_to_map(paused_db_schedule)
               new_state = Map.put(state, schedule_id, paused_schedule)
@@ -231,15 +231,15 @@ defmodule BotArmyJob.ScheduleStore do
 
       _schedule ->
         schedule_uuid = Ecto.UUID.cast!(schedule_id)
-        db_schedule = BotArmyJob.Repo.get(BotArmyJob.Schemas.Schedule, schedule_uuid)
+        db_schedule = BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
 
         if db_schedule do
-          changeset = BotArmyJob.Schemas.Schedule.changeset(
+          changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
             db_schedule,
             %{"status" => "active"}
           )
 
-          case BotArmyJob.Repo.update(changeset) do
+          case BotArmyJobScheduler.Repo.update(changeset) do
             {:ok, resumed_db_schedule} ->
               resumed_schedule = schema_to_map(resumed_db_schedule)
               new_state = Map.put(state, schedule_id, resumed_schedule)
@@ -285,7 +285,7 @@ defmodule BotArmyJob.ScheduleStore do
   end
 
   # Helper function to convert Ecto schema to map for GenServer state
-  defp schema_to_map(%BotArmyJob.Schemas.Schedule{} = schedule) do
+  defp schema_to_map(%BotArmyJobScheduler.Schemas.Schedule{} = schedule) do
     %{
       "id" => Ecto.UUID.cast!(schedule.id) |> to_string(),
       "title" => schedule.title,

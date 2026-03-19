@@ -1,2 +1,2 @@
 ExUnit.start()
-Mox.defmock(BotArmyJob.ScheduleStoreMock, for: BotArmyJob.ScheduleStoreBehaviour)
+Mox.defmock(BotArmyJobScheduler.ScheduleStoreMock, for: BotArmyJobScheduler.ScheduleStoreBehaviour)

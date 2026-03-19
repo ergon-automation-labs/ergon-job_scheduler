@@ -1,9 +1,11 @@
-#!/bin/bash
-# Git pre-push hook for bot_army_job
-# Validates compilation and builds release before pushing to GitHub
-# Tests run in Jenkins (not locally)
+#!/bin/zsh
+# Git pre-push hook for bot_army_job_scheduler
+# Validates compilation and builds release before pushing to main. Jenkins deploys from GitHub releases.
 
 set -e
+
+# Source shell profile to load Elixir/Mix environment
+[ -f ~/.zshrc ] && source ~/.zshrc
 
 echo "🔍 Running pre-push checks..."
 echo ""
@@ -14,14 +16,12 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
   echo "⚠️  Pushing to main branch - validating and building release..."
   echo ""
 
-  # Ensure dependencies are up to date
   echo "📦 Installing dependencies..."
   mix deps.get || {
     echo "❌ Failed to install dependencies"
     exit 1
   }
 
-  # Check for compilation issues (quick validation)
   echo ""
   echo "🔨 Compiling code..."
   mix compile --force || {
@@ -29,14 +29,10 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
     exit 1
   }
 
-  # Quick linting check (non-blocking)
   echo ""
-  echo "📝 Running linter..."
-  mix credo --strict || {
-    echo "⚠️  Linting issues found (non-blocking, will fail in CI)"
-  }
+  echo "📝 Running linter (optional)..."
+  mix credo --strict 2>/dev/null || true
 
-  # Run tests (required before release)
   echo ""
   echo "🧪 Running tests..."
   mix test || {
@@ -44,7 +40,6 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
     exit 1
   }
 
-  # Build OTP release
   echo ""
   echo "📦 Building OTP release..."
   MIX_ENV=prod mix release --overwrite || {
@@ -52,23 +47,29 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
     exit 1
   }
 
-  # Extract version and create GitHub release
   echo ""
   echo "🚀 Publishing release to GitHub..."
-  VERSION=$(cat _build/prod/rel/job_bot/releases/start_erl.data | awk '{print $2}')
+  RELEASE_NAME="job_scheduler_bot"
+  BOT_NAME="job_scheduler"
+  VERSION=$(grep 'version:' mix.exs | head -1 | sed 's/.*version: "\([^"]*\)".*/\1/')
+  if [ -z "$VERSION" ]; then
+    echo "❌ Could not read version from mix.exs"
+    exit 1
+  fi
   echo "Version: $VERSION"
 
-  # Create tarball
-  tar -czf job_bot-$VERSION.tar.gz -C _build/prod/rel job_bot/ || {
+  cd _build/prod/rel
+  tar -czf "$BOT_NAME-$VERSION.tar.gz" -C "$RELEASE_NAME" . || {
     echo "❌ Failed to create tarball"
     exit 1
   }
-  echo "✓ Tarball created: job_bot-$VERSION.tar.gz"
+  cd - > /dev/null
+  echo "✓ Tarball created: $BOT_NAME-$VERSION.tar.gz"
 
-  # Create GitHub release
-  gh release create v$VERSION job_bot-$VERSION.tar.gz \
+  gh release create "v$VERSION" "_build/prod/rel/$BOT_NAME-$VERSION.tar.gz" \
+    --repo "ergon-automation-labs/ergon-job-scheduler" \
     --title "Release v$VERSION" \
-    --notes "Job Bot Elixir release v$VERSION. Automatically deployed by Jenkins." \
+    --notes "Job Scheduler Elixir release v$VERSION. Deployed by Jenkins." \
     --draft=false || {
     echo "⚠️  Release already exists or GitHub publish failed"
     echo "Continuing with push anyway..."

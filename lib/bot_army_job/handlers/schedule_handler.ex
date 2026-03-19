@@ -1,4 +1,4 @@
-defmodule BotArmyJob.Handlers.ScheduleHandler do
+defmodule BotArmyJobScheduler.Handlers.ScheduleHandler do
   @moduledoc """
   Handles job scheduling events for the Job bot.
 
@@ -11,8 +11,8 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
 
   ## Dependencies
 
-  - `BotArmyJob.ScheduleStore` - Persistent schedule storage
-  - `BotArmyJob.NATS.Publisher` - Event publishing
+  - `BotArmyJobScheduler.ScheduleStore` - Persistent schedule storage
+  - `BotArmyJobScheduler.NATS.Publisher` - Event publishing
   """
 
   require Logger
@@ -78,7 +78,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
   # Private functions
 
   defp schedule_store do
-    Application.get_env(:bot_army_job, :schedule_store, BotArmyJob.ScheduleStore)
+    Application.get_env(:bot_army_job, :schedule_store, BotArmyJobScheduler.ScheduleStore)
   end
 
   defp validate_create_payload(payload) when is_map(payload) do
@@ -118,7 +118,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
       }
     }
 
-    case BotArmyJob.NATS.Publisher.publish(event_data) do
+    case BotArmyJobScheduler.NATS.Publisher.publish(event_data) do
       :ok -> Logger.debug("Published event: #{event_type}")
       {:error, reason} -> Logger.error("Failed to publish event: #{inspect(reason)}")
     end
@@ -140,7 +140,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandler do
       }
     }
 
-    case BotArmyJob.NATS.Publisher.publish(error_event) do
+    case BotArmyJobScheduler.NATS.Publisher.publish(error_event) do
       :ok -> Logger.debug("Published error event")
       {:error, err} -> Logger.error("Failed to publish error: #{inspect(err)}")
     end

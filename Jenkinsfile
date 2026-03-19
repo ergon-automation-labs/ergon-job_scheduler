@@ -13,10 +13,10 @@ pipeline {
   }
 
   environment {
-    BOT_NAME = 'job_bot'
-    STATE_NAME = 'job_bot'
+    BOT_NAME = 'job_scheduler'
+    STATE_NAME = 'job_scheduler'
     RELEASE_DIR = "/opt/ergon/releases/${BOT_NAME}"
-    GITHUB_REPO = "ergon-automation-labs/ergon-job"
+    GITHUB_REPO = "ergon-automation-labs/ergon-job-scheduler"
     SALT_TARGET = '-G bot_army_node_type:air'
   }
 
@@ -127,7 +127,7 @@ pipeline {
           echo "==============================================="
 
           # Get the release binary path
-          RELEASE_BIN="${RELEASE_DIR}/current/job_bot/bin/job_bot"
+          RELEASE_BIN="${RELEASE_DIR}/current/job_scheduler/bin/job_scheduler"
 
           if [ ! -f "$RELEASE_BIN" ]; then
             echo "⚠️  Release binary not found at $RELEASE_BIN"
@@ -137,9 +137,9 @@ pipeline {
 
           # Run migrations using the release
           # The release has database config from launchd environment
-          echo "Running: $RELEASE_BIN eval 'JobBot.Release.migrate()'"
+          echo "Running: $RELEASE_BIN eval 'BotArmyJobScheduler.Release.migrate()'"
 
-          $RELEASE_BIN eval 'JobBot.Release.migrate()' || {
+          $RELEASE_BIN eval 'BotArmyJobScheduler.Release.migrate()' || {
             echo "⚠️  Migration failed or Release module not found"
             echo "Continuing with deployment (manual migration may be needed)"
           }

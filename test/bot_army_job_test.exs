@@ -1,8 +1,8 @@
-defmodule BotArmyJobTest do
+defmodule BotArmyJobSchedulerTest do
   use ExUnit.Case
-  doctest BotArmyJob
+  doctest BotArmyJobScheduler
 
   test "version" do
-    assert BotArmyJob.version() == "0.1.0"
+    assert BotArmyJobScheduler.version() == "0.1.0"
   end
 end

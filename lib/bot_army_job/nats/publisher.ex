@@ -1,4 +1,4 @@
-defmodule BotArmyJob.NATS.Publisher do
+defmodule BotArmyJobScheduler.NATS.Publisher do
   @moduledoc """
   NATS event publisher for the Job bot.
 
@@ -14,6 +14,31 @@ defmodule BotArmyJob.NATS.Publisher do
   """
 
   require Logger
+
+  @doc """
+  Publish a message directly to a NATS subject.
+
+  Takes a subject string and message map. Returns `:ok` if successful, or `{:error, reason}` on failure.
+  """
+  def publish(subject, message) when is_binary(subject) and is_map(message) do
+    try do
+      body = Jason.encode!(message)
+
+      case do_publish(subject, body) do
+        :ok ->
+          Logger.debug("Published message to #{subject}")
+          :ok
+
+        {:error, reason} ->
+          Logger.error("Failed to publish to #{subject}: #{inspect(reason)}")
+          {:error, reason}
+      end
+    rescue
+      e ->
+        Logger.error("Exception during publish: #{inspect(e)}")
+        {:error, e}
+    end
+  end
 
   @doc """
   Publish an event to NATS.

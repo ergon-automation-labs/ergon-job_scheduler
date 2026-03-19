@@ -1,4 +1,4 @@
-# BotArmyJob
+# BotArmyJobScheduler
 
 Job scheduling and management bot implementation for the Bot Army ecosystem.
 

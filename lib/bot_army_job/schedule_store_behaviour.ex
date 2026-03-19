@@ -1,4 +1,4 @@
-defmodule BotArmyJob.ScheduleStoreBehaviour do
+defmodule BotArmyJobScheduler.ScheduleStoreBehaviour do
   @moduledoc """
   Behaviour definition for schedule storage.
 

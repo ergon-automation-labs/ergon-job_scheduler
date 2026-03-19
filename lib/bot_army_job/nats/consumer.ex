@@ -1,4 +1,4 @@
-defmodule BotArmyJob.NATS.Consumer do
+defmodule BotArmyJobScheduler.NATS.Consumer do
   @moduledoc """
   NATS message consumer for the Job bot.
 
@@ -94,8 +94,8 @@ defmodule BotArmyJob.NATS.Consumer do
     event = message["event"]
 
     case event do
-      "job.schedule.create" -> BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
-      "job.schedule.update" -> BotArmyJob.Handlers.ScheduleHandler.handle_update(message)
+      "job.schedule.create" -> BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
+      "job.schedule.update" -> BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(message)
       _ -> Logger.debug("Unknown Job event type: #{event}")
     end
   end

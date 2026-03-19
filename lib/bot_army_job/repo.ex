@@ -1,4 +1,4 @@
-defmodule BotArmyJob.Repo do
+defmodule BotArmyJobScheduler.Repo do
   @moduledoc """
   Ecto Repository for the Job bot.
 

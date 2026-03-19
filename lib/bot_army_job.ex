@@ -1,6 +1,6 @@
-defmodule BotArmyJob do
+defmodule BotArmyJobScheduler do
   @moduledoc """
-  BotArmyJob is the job scheduling and management bot implementation.
+  BotArmyJobScheduler is the job scheduling and management bot implementation.
 
   Handles job scheduling, execution management, and status tracking
   within the Bot Army ecosystem.

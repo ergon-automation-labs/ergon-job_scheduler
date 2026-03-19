@@ -1,4 +1,4 @@
-defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
+defmodule BotArmyJobScheduler.Handlers.ScheduleHandlerTest do
   use ExUnit.Case
   import Mox
 
@@ -26,12 +26,12 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "updated_at" => "2024-01-01T00:00:00"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :create, fn ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :create, fn ^payload ->
         {:ok, expected_schedule}
       end)
 
       message = valid_create_message()
-      assert :ok = BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
+      assert :ok = BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
     end
 
     test "returns error for missing required fields" do
@@ -39,7 +39,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         valid_create_message()
         |> put_in(["payload", "job_name"], nil)
 
-      assert :ok = BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
+      assert :ok = BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
     end
 
     test "requires both job_name and cron_expression" do
@@ -47,7 +47,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         valid_create_message()
         |> put_in(["payload", "cron_expression"], nil)
 
-      assert :ok = BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
+      assert :ok = BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
     end
 
     test "sets correct default values" do
@@ -69,12 +69,12 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "updated_at" => "2024-01-01T00:00:00"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :create, fn ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :create, fn ^payload ->
         {:ok, expected_schedule}
       end)
 
       message = valid_create_message()
-      BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
+      BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
     end
 
     test "includes job_name and cron_expression in created schedule" do
@@ -98,12 +98,12 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "updated_at" => "2024-01-01T00:00:00"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :create, fn ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :create, fn ^payload ->
         {:ok, expected_schedule}
       end)
 
       message = valid_create_message()
-      BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
+      BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
     end
 
     test "accepts optional command, timeout, and description" do
@@ -127,7 +127,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "updated_at" => "2024-01-01T00:00:00"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :create, fn ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :create, fn ^payload ->
         {:ok, expected_schedule}
       end)
 
@@ -136,7 +136,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         |> put_in(["payload", "command"], "/scripts/backup.sh")
         |> put_in(["payload", "timeout"], 3600)
 
-      BotArmyJob.Handlers.ScheduleHandler.handle_create(message)
+      BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
     end
   end
 
@@ -157,7 +157,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "status" => "active"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :update, fn ^schedule_id, ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :update, fn ^schedule_id, ^payload ->
         {:ok, expected_schedule}
       end)
 
@@ -167,7 +167,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "payload" => payload
       }
 
-      BotArmyJob.Handlers.ScheduleHandler.handle_update(update_msg)
+      BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(update_msg)
     end
 
     test "returns error when updating non-existent schedule" do
@@ -178,7 +178,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "title" => "Updated Title"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :update, fn ^schedule_id, ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :update, fn ^schedule_id, ^payload ->
         {:error, :not_found}
       end)
 
@@ -188,7 +188,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "payload" => payload
       }
 
-      assert :ok = BotArmyJob.Handlers.ScheduleHandler.handle_update(update_msg)
+      assert :ok = BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(update_msg)
     end
 
     test "preserves unmodified fields during update" do
@@ -206,7 +206,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "status" => "active"
       }
 
-      Mox.expect(BotArmyJob.ScheduleStoreMock, :update, fn ^schedule_id, ^payload ->
+      Mox.expect(BotArmyJobScheduler.ScheduleStoreMock, :update, fn ^schedule_id, ^payload ->
         {:ok, expected_schedule}
       end)
 
@@ -216,7 +216,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         "payload" => payload
       }
 
-      BotArmyJob.Handlers.ScheduleHandler.handle_update(update_msg)
+      BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(update_msg)
     end
 
     test "requires schedule_id for update" do
@@ -228,7 +228,7 @@ defmodule BotArmyJob.Handlers.ScheduleHandlerTest do
         }
       }
 
-      assert :ok = BotArmyJob.Handlers.ScheduleHandler.handle_update(update_msg)
+      assert :ok = BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(update_msg)
     end
   end
 

@@ -1,12 +1,14 @@
 # CLAUDE.md
 
-Guidance for Claude Code when working with `bot_army_job`.
+Guidance for Claude Code when working with `bot_army_job_scheduler`.
+
+⚫ **STATUS: INACTIVE/SCAFFOLDED** — This bot is not currently in active development. It is scaffolded for potential future use (job scheduling functionality). All active work is focused on `bot_army_job_applications` (Job Application Tracking Bot).
 
 ---
 
 ## Purpose
 
-**bot_army_job** is the job scheduling and management bot implementation.
+**bot_army_job_scheduler** is the job scheduling and management bot implementation.
 
 Handles:
 - Job scheduling and timing management
@@ -21,8 +23,8 @@ Handles:
 ```
 .
 ├── lib/
-│   ├── bot_army_job.ex                  # Main module
-│   └── bot_army_job/
+│   ├── bot_army_job_scheduler.ex        # Main module
+│   └── bot_army_job_scheduler/
 │       ├── application.ex                # Application supervisor
 │       ├── nats/
 │       │   └── consumer.ex               # NATS message consumer
@@ -32,7 +34,7 @@ Handles:
 │           └── status_handler.ex
 ├── test/
 │   ├── test_helper.exs
-│   └── bot_army_job/
+│   └── bot_army_job_scheduler/
 │       ├── nats/
 │       │   └── consumer_test.exs
 │       └── handlers/
@@ -66,10 +68,10 @@ mix test
 
 ### Key Modules to Implement
 
-1. **BotArmyJob.NATS.Consumer** - Subscribe to NATS subjects
-2. **BotArmyJob.Handlers.ScheduleHandler** - Handle job scheduling
-3. **BotArmyJob.Handlers.ExecutionHandler** - Manage job execution
-4. **BotArmyJob.Handlers.StatusHandler** - Track job status
+1. **BotArmyJobScheduler.NATS.Consumer** - Subscribe to NATS subjects
+2. **BotArmyJobScheduler.Handlers.ScheduleHandler** - Handle job scheduling
+3. **BotArmyJobScheduler.Handlers.ExecutionHandler** - Manage job execution
+4. **BotArmyJobScheduler.Handlers.StatusHandler** - Track job status
 
 ### Message Subjects
 

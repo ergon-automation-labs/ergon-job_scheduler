@@ -1,4 +1,4 @@
-defmodule BotArmyJob.Schemas.Schedule do
+defmodule BotArmyJobScheduler.Schemas.Schedule do
   @moduledoc """
   Ecto schema for job schedules.
   """

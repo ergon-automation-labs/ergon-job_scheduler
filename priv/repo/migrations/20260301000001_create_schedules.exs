@@ -1,4 +1,4 @@
-defmodule BotArmyJob.Repo.Migrations.CreateSchedules do
+defmodule BotArmyJobScheduler.Repo.Migrations.CreateSchedules do
   use Ecto.Migration
 
   def change do
