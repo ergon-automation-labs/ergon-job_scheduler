@@ -49,7 +49,7 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
 
   echo ""
   echo "🚀 Publishing release to GitHub..."
-  RELEASE_NAME="job_scheduler_bot"
+  RELEASE_NAME="job_scheduler"
   BOT_NAME="job_scheduler"
   VERSION=$(grep 'version:' mix.exs | head -1 | sed 's/.*version: "\([^"]*\)".*/\1/')
   if [ -z "$VERSION" ]; then

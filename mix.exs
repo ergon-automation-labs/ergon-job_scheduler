@@ -4,12 +4,12 @@ defmodule BotArmyJobScheduler.MixProject do
   def project do
     [
       app: :bot_army_job_scheduler,
-      version: "0.1.2",
+      version: "0.1.3",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       releases: [
-        job_scheduler_bot: [
+        job_scheduler: [
           applications: [bot_army_job_scheduler: :permanent]
         ]
       ]
