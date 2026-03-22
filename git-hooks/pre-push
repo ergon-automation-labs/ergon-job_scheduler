@@ -1,11 +1,11 @@
-#!/bin/zsh
+#!/bin/bash
 # Git pre-push hook for bot_army_job_scheduler
 # Validates compilation and builds release before pushing to main. Jenkins deploys from GitHub releases.
 
 set -e
 
-# Source shell profile to load Elixir/Mix environment
-[ -f ~/.zshrc ] && source ~/.zshrc
+# Add mise-managed binaries to PATH
+export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 echo "🔍 Running pre-push checks..."
 echo ""
