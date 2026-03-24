@@ -16,7 +16,7 @@ pipeline {
     BOT_NAME = 'job_scheduler'
     STATE_NAME = 'job'
     RELEASE_DIR = "/opt/ergon/releases/${BOT_NAME}"
-    GITHUB_REPO = "ergon-automation-labs/ergon-job"
+    GITHUB_REPO = "ergon-automation-labs/ergon-job_scheduler"
     SALT_TARGET = '-G bot_army_node_type:air'
   }
 
