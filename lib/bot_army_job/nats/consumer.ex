@@ -48,20 +48,61 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
     }
 
     Logger.info("Job NATS consumer initialized, ready to receive messages from NATS broker")
-    {:ok, state}
+    {:ok, state, {:continue, :connect}}
+  end
+
+  @impl true
+  def handle_continue(:connect, state) do
+    case GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5000) do
+      {:ok, conn} ->
+        BotArmyRuntime.NATS.Connection.subscribe_to_status()
+
+        subjects = [
+          "job.schedule.create",
+          "job.schedule.update"
+        ]
+
+        subs =
+          Enum.reduce_while(subjects, [], fn subject, acc ->
+            case Gnat.sub(conn, self(), subject) do
+              {:ok, sub} ->
+                Logger.info("Job consumer subscribed to #{subject}")
+                {:cont, [sub | acc]}
+
+              {:error, reason} ->
+                Logger.error("Failed to subscribe to #{subject}: #{inspect(reason)}")
+                {:halt, acc}
+            end
+          end)
+
+        if length(subs) == length(subjects) do
+          {:noreply, %{state | subscriptions: subs}}
+        else
+          Logger.error("Failed to subscribe to all Job topics")
+          Process.send_after(self(), :reconnect, @reconnect_delay_ms)
+          {:noreply, state}
+        end
+
+      {:error, _reason} ->
+        Logger.warning("NATS connection not ready, will retry")
+        Process.send_after(self(), :reconnect, @reconnect_delay_ms)
+        {:noreply, state}
+    end
   end
 
   @impl true
   def handle_info({:msg, msg}, state) do
-    Logger.debug("Received NATS message on subject: #{msg.topic}")
+    BotArmyRuntime.Tracing.with_consumer_span(msg.topic, msg.headers, fn ->
+      Logger.debug("Received NATS message on subject: #{msg.topic}")
 
-    case BotArmyCore.NATS.Decoder.decode(msg.body) do
-      {:ok, decoded_message} ->
-        route_message(decoded_message)
+      case BotArmyCore.NATS.Decoder.decode(msg.body) do
+        {:ok, decoded_message} ->
+          route_message(decoded_message)
 
-      {:error, reason} ->
-        Logger.warning("Failed to decode message from #{msg.topic}: #{inspect(reason)}")
-    end
+        {:error, reason} ->
+          Logger.warning("Failed to decode message from #{msg.topic}: #{inspect(reason)}")
+      end
+    end)
 
     {:noreply, state}
   end
@@ -76,13 +117,13 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   def handle_info({:nats, :disconnected}, state) do
     Logger.warning("Disconnected from NATS, will reconnect")
     Process.send_after(self(), :reconnect, @reconnect_delay_ms)
-    {:noreply, %{state | connection: nil}}
+    {:noreply, %{state | subscriptions: []}}
   end
 
   @impl true
   def handle_info({:nats, :connected}, state) do
-    Logger.info("Reconnected to NATS")
-    {:noreply, state}
+    Logger.info("Reconnected to NATS, re-subscribing")
+    {:noreply, state, {:continue, :connect}}
   end
 
   # Private functions
