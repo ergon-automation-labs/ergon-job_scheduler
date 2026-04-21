@@ -6,7 +6,7 @@ defmodule BotArmyJobScheduler.Repo.Migrations.CreateSouls do
       add(:id, :binary_id, primary_key: true)
       add(:bot_id, :string, null: false)
       add(:tenant_id, :binary_id, null: false)
-      add(:config, :jsonb, null: false, default: %{})
+      add(:config, :jsonb, null: false, default: "{}")
       add(:version, :integer, null: false, default: 1)
       add(:active, :boolean, null: false, default: true)
 
