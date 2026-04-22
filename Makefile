@@ -1,4 +1,6 @@
-.PHONY: setup help deps test credo dialyzer coverage check format clean release publish-release setup-hooks setup-db reset-db deploy
+SCRIPTS_DIRECTORY ?= $(abspath $(CURDIR)/../scripts)
+
+.PHONY: test-handlers test-stores test-nats test-integration test-full setup help deps test credo dialyzer coverage check format clean release publish-release setup-hooks setup-db reset-db logs deploy
 
 help:
 	@echo "BotArmyJob - Job Scheduling Bot"
@@ -17,6 +19,9 @@ help:
 	@echo "  make check           - Run all checks (test, credo, dialyzer)"
 	@echo "  make format          - Format Elixir code"
 	@echo "  make clean           - Clean build artifacts"
+	@echo ""
+	@echo "Operations (deployed server logs):"
+	@echo "  make logs            - Tail job_scheduler log with grc (brew install grc; make -C .. install-grc)"
 	@echo ""
 	@echo "Release commands (normally automatic via git hook):"
 	@echo "  make release         - Build OTP release locally (manual, if needed)"
@@ -62,6 +67,21 @@ deps:
 
 test:
 	mix test
+
+test-handlers:
+	MIX_ENV=test mix test --only handlers --trace
+
+test-stores:
+	MIX_ENV=test mix test --only stores --trace
+
+test-nats:
+	MIX_ENV=test mix test --only nats --trace
+
+test-integration:
+	mix test --include integration --trace
+
+test-full:
+	mix test --include integration --include nats_live --trace
 
 credo:
 	mix credo
@@ -157,3 +177,6 @@ deploy: release
 	echo "1. Verify service is running: launchctl list com.botarmy.job_scheduler"; \
 	echo "2. Check logs: tail -50 /var/log/bot_army/job_scheduler.log"; \
 	echo ""
+
+logs:
+	@$(SCRIPTS_DIRECTORY)/tail_bot_log.sh
