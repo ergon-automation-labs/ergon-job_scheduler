@@ -1,5 +1,6 @@
 defmodule BotArmyJobScheduler.Handlers.ScheduleHandlerTest do
   use ExUnit.Case
+  @moduletag :handlers
   import Mox
 
   setup :verify_on_exit!

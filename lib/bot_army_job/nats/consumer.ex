@@ -92,7 +92,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
   @impl true
   def handle_info({:msg, msg}, state) do
-    BotArmyRuntime.Tracing.with_consumer_span(msg.topic, msg.headers, fn ->
+    BotArmyRuntime.Tracing.with_consumer_span(msg.topic, Map.get(msg, :headers, []), fn ->
       Logger.debug("Received NATS message on subject: #{msg.topic}")
 
       case BotArmyCore.NATS.Decoder.decode(msg.body) do
