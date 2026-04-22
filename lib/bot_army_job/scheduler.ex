@@ -12,7 +12,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   require Logger
 
   @server __MODULE__
-  @check_interval_ms 60_000  # Check every minute
+  # Check every minute
+  @check_interval_ms 60_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -38,12 +39,17 @@ defmodule BotArmyJobScheduler.Scheduler do
 
   defp check_and_run_due_schedules do
     try do
-      schedules = BotArmyJobScheduler.ScheduleStore.list()
       now = DateTime.utc_now()
 
-      schedules
-      |> Enum.filter(&is_due?(&1, now))
-      |> Enum.each(&execute_schedule/1)
+      case BotArmyJobScheduler.ScheduleStore.list() do
+        {:ok, schedules} ->
+          schedules
+          |> Enum.filter(&is_due?(&1, now))
+          |> Enum.each(&execute_schedule/1)
+
+        {:error, reason} ->
+          Logger.error("Failed to list schedules: #{inspect(reason)}")
+      end
     rescue
       error ->
         Logger.error("Error checking schedules: #{inspect(error)}")
@@ -63,7 +69,10 @@ defmodule BotArmyJobScheduler.Scheduler do
             due and not_recently_run
 
           {:error, _} ->
-            Logger.warn("Invalid cron expression for schedule #{schedule.id}: #{schedule.cron_expression}")
+            Logger.warn(
+              "Invalid cron expression for schedule #{schedule.id}: #{schedule.cron_expression}"
+            )
+
             false
         end
 
