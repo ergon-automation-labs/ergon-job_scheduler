@@ -6,6 +6,11 @@ set -e
 
 MIX_BIN="/Users/abby/.local/share/mise/shims/mix"
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export HEX_HOME="$REPO_ROOT/.cache/hex"
+export MIX_HOME="$REPO_ROOT/.cache/mix"
+mkdir -p "$HEX_HOME" "$MIX_HOME"
+
 # Add mise-managed binaries to PATH
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 
