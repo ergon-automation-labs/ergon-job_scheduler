@@ -28,6 +28,13 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   @nats_url System.get_env("NATS_URL", "nats://localhost:4222")
   @reconnect_delay_ms 5000
   @max_reconnect_retries 10
+  @version Mix.Project.config()[:version]
+  @registry_heartbeat_ms 20_000
+
+  @subjects [
+    %{subject: "job.schedule.create", type: :subscribe, description: "Create scheduled job"},
+    %{subject: "job.schedule.update", type: :subscribe, description: "Update scheduled job"}
+  ]
 
   # API
 
@@ -76,6 +83,8 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
           end)
 
         if length(subs) == length(subjects) do
+          BotArmyRuntime.Registry.register("job_scheduler", @subjects, @version)
+        Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
           {:noreply, %{state | subscriptions: subs}}
         else
           Logger.error("Failed to subscribe to all Job topics")
@@ -124,6 +133,16 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   def handle_info({:nats, :connected}, state) do
     Logger.info("Reconnected to NATS, re-subscribing")
     {:noreply, state, {:continue, :connect}}
+  end
+
+  @impl true
+  def handle_info(:registry_heartbeat, state) do
+    if length(state.subscriptions) > 0 do
+      BotArmyRuntime.Registry.register("job_scheduler", @subjects, @version)
+      Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
+    end
+
+    {:noreply, state}
   end
 
   # Private functions
