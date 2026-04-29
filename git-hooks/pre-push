@@ -4,6 +4,8 @@
 
 set -e
 
+MIX_BIN="/Users/abby/.local/share/mise/shims/mix"
+
 # Add mise-managed binaries to PATH
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 
@@ -17,32 +19,32 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
   echo ""
 
   echo "📦 Installing dependencies..."
-  mix deps.get || {
+  $MIX_BIN deps.get || {
     echo "❌ Failed to install dependencies"
     exit 1
   }
 
   echo ""
   echo "🔨 Compiling code..."
-  mix compile --force || {
+  $MIX_BIN compile --force || {
     echo "❌ Compilation failed - push aborted"
     exit 1
   }
 
   echo ""
   echo "📝 Running linter (optional)..."
-  mix credo --strict 2>/dev/null || true
+  $MIX_BIN credo --strict 2>/dev/null || true
 
   echo ""
   echo "🧪 Running tests..."
-  mix test || {
+  $MIX_BIN test || {
     echo "❌ Tests failed - push aborted"
     exit 1
   }
 
   echo ""
   echo "📦 Building OTP release..."
-  MIX_ENV=prod mix release --overwrite || {
+  MIX_ENV=prod $MIX_BIN release --overwrite || {
     echo "❌ Release build failed - push aborted"
     exit 1
   }
@@ -75,6 +77,13 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
     echo "Continuing with push anyway..."
   }
   echo "✓ Release published to GitHub"
+
+  # Cleanup build artifacts created by this hook
+  echo ""
+  echo "🧹 Cleaning up local release artifacts..."
+  rm -f ./*.tar.gz
+  rm -rf ./_build
+  echo "✓ Cleanup complete"
 
   echo ""
   echo "✅ All checks passed, release built and published!"
