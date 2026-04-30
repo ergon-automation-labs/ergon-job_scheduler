@@ -73,13 +73,20 @@ if [[ $remote_ref == "refs/heads/main" ]]; then
   cd - > /dev/null
   echo "✓ Tarball created: $BOT_NAME-$VERSION.tar.gz"
 
+  if gh release view "v$VERSION" --repo "ergon-automation-labs/ergon-job" >/dev/null 2>&1; then
+    echo "❌ GitHub release v$VERSION already exists."
+    echo "   A prior run may have published the tarball while git push did not complete."
+    echo "   Bump :version in mix.exs, commit, and push again (do not replace published assets)."
+    exit 1
+  fi
+
   gh release create "v$VERSION" "_build/prod/rel/$BOT_NAME-$VERSION.tar.gz" \
     --repo "ergon-automation-labs/ergon-job" \
     --title "Release v$VERSION" \
     --notes "Job Scheduler Elixir release v$VERSION. Deployed by Jenkins." \
     --draft=false || {
-    echo "⚠️  Release already exists or GitHub publish failed"
-    echo "Continuing with push anyway..."
+    echo "❌ Failed to create GitHub release"
+    exit 1
   }
   echo "✓ Release published to GitHub"
 
