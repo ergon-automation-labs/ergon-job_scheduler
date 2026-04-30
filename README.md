@@ -23,6 +23,23 @@ iex -S mix
 - **Job Scheduler** - Manages job scheduling and timing
 - **Execution Manager** - Handles job execution and status
 
+## Built-in Schema Sync Job
+
+`bot_army_job_scheduler` now seeds a default recurring schedule for schema drift checks:
+
+- **Title:** `Schema Sync Drift Check`
+- **Command:** `ops.schema_sync.run`
+- **Default cron:** `*/30 * * * *`
+- **Execution:** runs `make schema-sync-job PUBLISH=1 SUBJECT=synapse.context.schema_sync.report`
+
+Environment overrides:
+
+- `JOB_SCHEDULER_ENABLE_SCHEMA_SYNC` (default `true`) - set to `false` to disable seeding.
+- `JOB_SCHEDULER_SCHEMA_SYNC_CRON` (default `*/30 * * * *`) - custom cadence.
+- `JOB_SCHEDULER_SCHEMA_SYNC_TIMEOUT` (default `900`) - timeout in seconds for make job.
+- `JOB_SCHEDULER_SCHEMA_SYNC_SUBJECT` (default `synapse.context.schema_sync.report`) - publish subject.
+- `ELIXIR_BOTS_DIR` (default `/Users/abby/code/elixir_bots`) - repo root used when invoking `make`.
+
 ## Message Schemas
 
 Schemas are defined in `bot_army_schemas_job` and deployed to `/etc/bot_army/schemas/job/`

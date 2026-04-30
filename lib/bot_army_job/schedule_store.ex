@@ -23,6 +23,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @behaviour BotArmyJobScheduler.ScheduleStoreBehaviour
 
   @server __MODULE__
+  @schema_sync_command "ops.schema_sync.run"
 
   # API
 
@@ -109,16 +110,25 @@ defmodule BotArmyJobScheduler.ScheduleStore do
     Logger.info("ScheduleStore started")
     # Load all schedules from database into GenServer state
     # Gracefully handle database unavailability (e.g., in tests)
-    state = try do
-      schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
-      Enum.reduce(schedules, %{}, fn schedule, acc ->
-        Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
-      end)
-    rescue
-      _ ->
-        Logger.warning("Could not load schedules from database (database unavailable). Starting with empty state.")
-        %{}
-    end
+    state =
+      try do
+        schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
+
+        loaded_state =
+          Enum.reduce(schedules, %{}, fn schedule, acc ->
+            Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
+          end)
+
+        ensure_schema_sync_schedule(loaded_state)
+      rescue
+        _ ->
+          Logger.warning(
+            "Could not load schedules from database (database unavailable). Starting with empty state."
+          )
+
+          %{}
+      end
+
     {:ok, state}
   end
 
@@ -126,17 +136,18 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   def handle_call({:create, payload}, _from, state) do
     schedule_id = Ecto.UUID.generate()
 
-    changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
-      %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
-      %{
-        "title" => payload["title"],
-        "description" => Map.get(payload, "description"),
-        "cron_expression" => payload["cron_expression"],
-        "command" => payload["command"],
-        "timeout" => Map.get(payload, "timeout", 3600),
-        "status" => "active"
-      }
-    )
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => payload["title"],
+          "description" => Map.get(payload, "description"),
+          "cron_expression" => payload["cron_expression"],
+          "command" => payload["command"],
+          "timeout" => Map.get(payload, "timeout", 3600),
+          "status" => "active"
+        }
+      )
 
     case BotArmyJobScheduler.Repo.insert(changeset) do
       {:ok, db_schedule} ->
@@ -159,19 +170,23 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       _schedule ->
         schedule_uuid = Ecto.UUID.cast!(schedule_id)
-        db_schedule = BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
+
+        db_schedule =
+          BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
 
         if db_schedule do
-          changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
-            db_schedule,
-            %{
-              "title" => Map.get(payload, "title", db_schedule.title),
-              "description" => Map.get(payload, "description", db_schedule.description),
-              "cron_expression" => Map.get(payload, "cron_expression", db_schedule.cron_expression),
-              "command" => Map.get(payload, "command", db_schedule.command),
-              "timeout" => Map.get(payload, "timeout", db_schedule.timeout)
-            }
-          )
+          changeset =
+            BotArmyJobScheduler.Schemas.Schedule.changeset(
+              db_schedule,
+              %{
+                "title" => Map.get(payload, "title", db_schedule.title),
+                "description" => Map.get(payload, "description", db_schedule.description),
+                "cron_expression" =>
+                  Map.get(payload, "cron_expression", db_schedule.cron_expression),
+                "command" => Map.get(payload, "command", db_schedule.command),
+                "timeout" => Map.get(payload, "timeout", db_schedule.timeout)
+              }
+            )
 
           case BotArmyJobScheduler.Repo.update(changeset) do
             {:ok, updated_db_schedule} ->
@@ -198,13 +213,16 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       _schedule ->
         schedule_uuid = Ecto.UUID.cast!(schedule_id)
-        db_schedule = BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
+
+        db_schedule =
+          BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
 
         if db_schedule do
-          changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
-            db_schedule,
-            %{"status" => "paused"}
-          )
+          changeset =
+            BotArmyJobScheduler.Schemas.Schedule.changeset(
+              db_schedule,
+              %{"status" => "paused"}
+            )
 
           case BotArmyJobScheduler.Repo.update(changeset) do
             {:ok, paused_db_schedule} ->
@@ -231,13 +249,16 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       _schedule ->
         schedule_uuid = Ecto.UUID.cast!(schedule_id)
-        db_schedule = BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
+
+        db_schedule =
+          BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_uuid)
 
         if db_schedule do
-          changeset = BotArmyJobScheduler.Schemas.Schedule.changeset(
-            db_schedule,
-            %{"status" => "active"}
-          )
+          changeset =
+            BotArmyJobScheduler.Schemas.Schedule.changeset(
+              db_schedule,
+              %{"status" => "active"}
+            )
 
           case BotArmyJobScheduler.Repo.update(changeset) do
             {:ok, resumed_db_schedule} ->
@@ -266,9 +287,11 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
   @impl true
   def handle_call(:list, _from, state) do
-    schedules = state
+    schedules =
+      state
       |> Map.values()
       |> Enum.filter(fn s -> s["status"] == "active" end)
+
     {:reply, {:ok, schedules}, state}
   end
 
@@ -285,6 +308,60 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   end
 
   # Helper function to convert Ecto schema to map for GenServer state
+  defp ensure_schema_sync_schedule(state) do
+    if schema_sync_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @schema_sync_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_schema_sync_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp schema_sync_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_SCHEMA_SYNC", "true")
+    |> String.downcase()
+    |> Kernel.!=("false")
+  end
+
+  defp create_schema_sync_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Schema Sync Drift Check",
+          "description" => "Runs schema-sync and publishes synapse.context.schema_sync.report",
+          "cron_expression" => System.get_env("JOB_SCHEDULER_SCHEMA_SYNC_CRON", "*/30 * * * *"),
+          "command" => @schema_sync_command,
+          "timeout" =>
+            String.to_integer(System.get_env("JOB_SCHEDULER_SCHEMA_SYNC_TIMEOUT", "900")),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default schema-sync schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed schema-sync schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
   defp schema_to_map(%BotArmyJobScheduler.Schemas.Schedule{} = schedule) do
     %{
       "id" => Ecto.UUID.cast!(schedule.id) |> to_string(),
@@ -294,7 +371,11 @@ defmodule BotArmyJobScheduler.ScheduleStore do
       "command" => schedule.command,
       "timeout" => schedule.timeout,
       "status" => schedule.status,
-      "last_run_at" => if(schedule.last_run_at, do: schedule.last_run_at |> NaiveDateTime.to_iso8601(), else: nil),
+      "last_run_at" =>
+        if(schedule.last_run_at,
+          do: schedule.last_run_at |> NaiveDateTime.to_iso8601(),
+          else: nil
+        ),
       "created_at" => schedule.inserted_at |> NaiveDateTime.to_iso8601(),
       "updated_at" => schedule.updated_at |> NaiveDateTime.to_iso8601()
     }

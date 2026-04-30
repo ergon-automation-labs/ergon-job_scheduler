@@ -14,6 +14,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   @server __MODULE__
   # Check every minute
   @check_interval_ms 60_000
+  @schema_sync_command "ops.schema_sync.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -57,20 +58,25 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp is_due?(schedule, now) do
-    case schedule.status do
+    case schedule_value(schedule, "status", :status) do
       "active" ->
-        case Crontab.CronExpression.parse(schedule.cron_expression) do
+        case Crontab.CronExpression.parse(
+               schedule_value(schedule, "cron_expression", :cron_expression)
+             ) do
           {:ok, cron} ->
             # Check if the schedule is due to run
-            last_run = schedule.last_run_at || DateTime.add(now, -1_000_000, :second)
+            last_run = parse_last_run(schedule_value(schedule, "last_run_at", :last_run_at), now)
             due = Crontab.DateChecker.matches_date?(cron, now)
             not_recently_run = DateTime.diff(now, last_run, :second) >= 60
 
             due and not_recently_run
 
           {:error, _} ->
-            Logger.warn(
-              "Invalid cron expression for schedule #{schedule.id}: #{schedule.cron_expression}"
+            schedule_id = schedule_value(schedule, "id", :id)
+            cron_expression = schedule_value(schedule, "cron_expression", :cron_expression)
+
+            Logger.warning(
+              "Invalid cron expression for schedule #{schedule_id}: #{cron_expression}"
             )
 
             false
@@ -82,32 +88,85 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp execute_schedule(schedule) do
-    Logger.info("Executing schedule #{schedule.id}: #{schedule.title}")
+    schedule_id = schedule_value(schedule, "id", :id)
+    schedule_title = schedule_value(schedule, "title", :title)
+    Logger.info("Executing schedule #{schedule_id}: #{schedule_title}")
 
-    case publish_schedule_event(schedule) do
+    case run_schedule_command(schedule) do
       :ok ->
         # Update last_run_at in the store and database
         payload = %{"last_run_at" => DateTime.utc_now()}
-        BotArmyJobScheduler.ScheduleStore.update(schedule.id, payload)
-        Logger.info("Schedule #{schedule.id} executed successfully")
+        BotArmyJobScheduler.ScheduleStore.update(schedule_id, payload)
+        Logger.info("Schedule #{schedule_id} executed successfully")
 
       {:error, reason} ->
-        Logger.error("Failed to execute schedule #{schedule.id}: #{inspect(reason)}")
+        Logger.error("Failed to execute schedule #{schedule_id}: #{inspect(reason)}")
     end
+  end
+
+  defp run_schedule_command(schedule) do
+    case schedule_value(schedule, "command", :command) do
+      @schema_sync_command -> run_schema_sync_job(schedule)
+      _ -> publish_schedule_event(schedule)
+    end
+  end
+
+  defp run_schema_sync_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+
+    subject =
+      System.get_env("JOB_SCHEDULER_SCHEMA_SYNC_SUBJECT", "synapse.context.schema_sync.report")
+
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 900, 1) * 1000
+
+    args = [
+      "schema-sync-job",
+      "PUBLISH=1",
+      "SUBJECT=#{subject}"
+    ]
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "Schema-sync job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "Schema-sync job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:schema_sync_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error("Schema-sync job raised for schedule #{rescue_schedule_id}: #{inspect(error)}")
+
+      {:error, {:schema_sync_exception, error}}
   end
 
   defp publish_schedule_event(schedule) do
     # Build the NATS message
     message = %{
-      "schedule_id" => schedule.id,
-      "title" => schedule.title,
-      "command" => schedule.command,
-      "timeout" => schedule.timeout,
-      "cron_expression" => schedule.cron_expression
+      "schedule_id" => schedule_value(schedule, "id", :id),
+      "title" => schedule_value(schedule, "title", :title),
+      "command" => schedule_value(schedule, "command", :command),
+      "timeout" => schedule_value(schedule, "timeout", :timeout),
+      "cron_expression" => schedule_value(schedule, "cron_expression", :cron_expression)
     }
 
     # Publish to NATS - use the command to determine the subject
-    subject = schedule_command_to_subject(schedule.command)
+    subject = schedule_command_to_subject(schedule_value(schedule, "command", :command))
 
     case BotArmyRuntime.NATS.Publisher.publish(subject, message) do
       {:ok, _subject} -> :ok
@@ -120,6 +179,30 @@ defmodule BotArmyJobScheduler.Scheduler do
       "job.discovery.scan" -> "job.discovery.scan"
       "job.digest.generate" -> "job.digest.generate"
       other -> "job.schedule.execute:#{other}"
+    end
+  end
+
+  defp parse_last_run(nil, now), do: DateTime.add(now, -1_000_000, :second)
+  defp parse_last_run(%DateTime{} = last_run, _now), do: last_run
+
+  defp parse_last_run(%NaiveDateTime{} = naive, _now) do
+    DateTime.from_naive!(naive, "Etc/UTC")
+  end
+
+  defp parse_last_run(last_run, now) when is_binary(last_run) do
+    case DateTime.from_iso8601(last_run) do
+      {:ok, datetime, _} -> datetime
+      _ -> DateTime.add(now, -1_000_000, :second)
+    end
+  end
+
+  defp parse_last_run(_, now), do: DateTime.add(now, -1_000_000, :second)
+
+  defp schedule_value(schedule, string_key, atom_key) do
+    cond do
+      is_map(schedule) and Map.has_key?(schedule, string_key) -> Map.get(schedule, string_key)
+      is_map(schedule) and Map.has_key?(schedule, atom_key) -> Map.get(schedule, atom_key)
+      true -> nil
     end
   end
 end
