@@ -1,6 +1,6 @@
 SCRIPTS_DIRECTORY ?= $(abspath $(CURDIR)/../scripts)
 
-.PHONY: test-handlers test-stores test-nats test-integration test-full setup help deps test credo dialyzer coverage check format clean release publish-release setup-hooks setup-db reset-db logs deploy
+.PHONY: test-handlers test-stores test-nats test-integration test-full setup help deps test credo dialyzer coverage check format clean release publish-release setup-hooks setup-db reset-db logs deploy push-and-publish
 
 help:
 	@echo "BotArmyJob - Job Scheduling Bot"
@@ -23,13 +23,14 @@ help:
 	@echo "Operations (deployed server logs):"
 	@echo "  make logs            - Tail job_scheduler log with grc (brew install grc; make -C .. install-grc)"
 	@echo ""
-	@echo "Release commands (normally automatic via git hook):"
-	@echo "  make release         - Build OTP release locally (manual, if needed)"
-	@echo "  make publish-release - Build, package, and publish to GitHub (manual, if needed)"
+	@echo "Release commands:"
+	@echo "  make release         - Build OTP release locally"
+	@echo "  make publish-release - Build, package, and publish to GitHub"
 	@echo "  make deploy          - Deploy built release locally via Salt (for testing)"
 	@echo ""
 	@echo "Normal workflow:"
-	@echo "  git push             - Pre-push hook validates, builds, and publishes automatically"
+	@echo "  git push             - Fast compile+test validation"
+	@echo "  make push-and-publish - Push then publish release asset"
 	@echo "                         Jenkins then deploys automatically"
 	@echo ""
 
@@ -177,6 +178,9 @@ deploy: release
 	echo "1. Verify service is running: launchctl list com.botarmy.job_scheduler"; \
 	echo "2. Check logs: tail -50 /var/log/bot_army/job_scheduler.log"; \
 	echo ""
+
+push-and-publish:
+	@git push && $(MAKE) publish-release
 
 logs:
 	@$(SCRIPTS_DIRECTORY)/tail_bot_log.sh

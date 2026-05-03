@@ -1,6 +1,6 @@
 #!/bin/bash
-# Git pre-push hook for bot_army_job_scheduler
-# Validates compilation and builds release before pushing to main. Jenkins deploys from GitHub releases.
+# Lightweight git pre-push hook for Bot Army bots
+# Keep push fast/reliable: run quick local validation only.
 
 set -e
 
@@ -11,97 +11,38 @@ export HEX_HOME="$REPO_ROOT/.cache/hex"
 export MIX_HOME="$REPO_ROOT/.cache/mix"
 mkdir -p "$HEX_HOME" "$MIX_HOME"
 
-# Add mise-managed binaries to PATH
-export PATH="$HOME/.local/share/mise/shims:$PATH"
-
 echo "🔍 Running pre-push checks..."
 echo ""
 
-# Check if we're pushing to main
-read local_ref local_oid remote_ref remote_oid
-if [[ $remote_ref == "refs/heads/main" ]]; then
-  echo "⚠️  Pushing to main branch - validating and building release..."
+push_to_main=0
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [[ $remote_ref == "refs/heads/main" ]]; then
+    push_to_main=1
+  fi
+done
+
+if [[ $push_to_main -eq 1 ]]; then
+  echo "⚠️  Pushing to main branch - running fast validation only..."
   echo ""
 
-  echo "📦 Installing dependencies..."
-  $MIX_BIN deps.get || {
-    echo "❌ Failed to install dependencies"
-    exit 1
-  }
-
-  echo ""
   echo "🔨 Compiling code..."
-  $MIX_BIN compile --force || {
+  "$MIX_BIN" compile --force || {
     echo "❌ Compilation failed - push aborted"
     exit 1
   }
 
   echo ""
-  echo "📝 Running linter (optional)..."
-  $MIX_BIN credo --strict 2>/dev/null || true
-
-  echo ""
   echo "🧪 Running tests..."
-  $MIX_BIN test || {
+  "$MIX_BIN" test || {
     echo "❌ Tests failed - push aborted"
     exit 1
   }
 
   echo ""
-  echo "📦 Building OTP release..."
-  MIX_ENV=prod $MIX_BIN release --overwrite || {
-    echo "❌ Release build failed - push aborted"
-    exit 1
-  }
-
-  echo ""
-  echo "🚀 Publishing release to GitHub..."
-  RELEASE_NAME="job_scheduler"
-  BOT_NAME="job_scheduler"
-  VERSION=$(grep 'version:' mix.exs | head -1 | sed 's/.*version: "\([^"]*\)".*/\1/')
-  if [ -z "$VERSION" ]; then
-    echo "❌ Could not read version from mix.exs"
-    exit 1
-  fi
-  echo "Version: $VERSION"
-
-  cd _build/prod/rel
-  tar -czf "$BOT_NAME-$VERSION.tar.gz" "$RELEASE_NAME" || {
-    echo "❌ Failed to create tarball"
-    exit 1
-  }
-  cd - > /dev/null
-  echo "✓ Tarball created: $BOT_NAME-$VERSION.tar.gz"
-
-  if gh release view "v$VERSION" --repo "ergon-automation-labs/ergon-job" >/dev/null 2>&1; then
-    echo "❌ GitHub release v$VERSION already exists."
-    echo "   A prior run may have published the tarball while git push did not complete."
-    echo "   Bump :version in mix.exs, commit, and push again (do not replace published assets)."
-    exit 1
-  fi
-
-  gh release create "v$VERSION" "_build/prod/rel/$BOT_NAME-$VERSION.tar.gz" \
-    --repo "ergon-automation-labs/ergon-job" \
-    --title "Release v$VERSION" \
-    --notes "Job Scheduler Elixir release v$VERSION. Deployed by Jenkins." \
-    --draft=false || {
-    echo "❌ Failed to create GitHub release"
-    exit 1
-  }
-  echo "✓ Release published to GitHub"
-
-  # Cleanup build artifacts created by this hook
-  echo ""
-  echo "🧹 Cleaning up local release artifacts..."
-  rm -f ./*.tar.gz
-  rm -rf ./_build
-  echo "✓ Cleanup complete"
-
-  echo ""
-  echo "✅ All checks passed, release built and published!"
-  echo "📤 Proceeding with push..."
+  echo "✅ Pre-push checks passed"
+  echo "ℹ️  Publish releases explicitly with: make push-and-publish"
 else
-  echo "ℹ️  Pushing to feature branch - skipping validation"
+  echo "ℹ️  Pushing to feature branch - skipping pre-push validation"
 fi
 
 echo ""
