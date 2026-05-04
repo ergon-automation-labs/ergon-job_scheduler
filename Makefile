@@ -116,36 +116,29 @@ release: check
 	@echo ""
 
 publish-release: release
-	@echo "==============================================="
-	@echo "Publishing release to GitHub"
-	@echo "==============================================="
-	@echo ""
-
-	# Get version from mix.exs
-	VERSION=$$(grep 'version:' mix.exs | head -1 | sed 's/.*version: "\([^"]*\)".*/\1/'); \
+	@set -e; \
+	VERSION=$$(sed -n 's/^[[:space:]]*version:[[:space:]]*"\([^"]*\)".*/\1/p' mix.exs | head -n 1); \
+	if [ -z "$$VERSION" ]; then \
+		echo "Failed to resolve version from mix.exs"; \
+		exit 1; \
+	fi; \
+	TARBALL=job_scheduler-$$VERSION.tar.gz; \
 	echo "Version: $$VERSION"; \
-	\
-	# Create tarball with nested structure
 	echo "Creating release tarball..."; \
-	cd _build/prod/rel && tar -czf job_scheduler-$$VERSION.tar.gz job_scheduler && cd - > /dev/null; \
-	echo "✓ Tarball created: _build/prod/rel/job_scheduler-$$VERSION.tar.gz"; \
+	tar -czf "$$TARBALL" -C _build/prod/rel job_scheduler/; \
+	echo "✓ Tarball created: $$TARBALL"; \
 	echo ""; \
-	\
-	# Create GitHub release
 	echo "Creating GitHub release v$$VERSION..."; \
-	gh release create v$$VERSION _build/prod/rel/job_scheduler-$$VERSION.tar.gz \
-		--repo "ergon-automation-labs/ergon-job" \
-		--title "Release v$$VERSION" \
-		--notes "Job Scheduler Elixir release v$$VERSION. Deployed by Jenkins." \
-		--draft=false; \
+	if gh release view "v$$VERSION" >/dev/null 2>&1; then \
+		gh release upload "v$$VERSION" "$$TARBALL" --clobber; \
+	else \
+		gh release create "v$$VERSION" "$$TARBALL" \
+			--title "Release v$$VERSION" \
+			--notes "Job Scheduler Bot Elixir release v$$VERSION. Download and deploy with Jenkins." \
+			--draft=false; \
+	fi; \
 	echo "✓ Release published to GitHub"; \
-	echo ""; \
-	echo "Next steps:"; \
-	echo "1. Jenkins will automatically detect the new release"; \
-	echo "2. Trigger deployment in Jenkins UI or wait for auto-deployment"; \
-	echo "3. Monitor deployment in Jenkins"; \
-	echo ""
-
+	echo "" 
 deploy: release
 	@echo "==============================================="
 	@echo "Deploying release locally via Salt"
