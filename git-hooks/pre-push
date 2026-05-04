@@ -25,6 +25,17 @@ if [[ $push_to_main -eq 1 ]]; then
   echo "⚠️  Pushing to main branch - running fast validation only..."
   echo ""
 
+  echo "📦 Ensuring Hex + dependencies..."
+  "$MIX_BIN" local.hex --force || {
+    echo "❌ mix local.hex failed - push aborted"
+    exit 1
+  }
+  "$MIX_BIN" deps.get --force || {
+    echo "❌ mix deps.get failed - push aborted"
+    exit 1
+  }
+  echo ""
+
   echo "🔨 Compiling code..."
   "$MIX_BIN" compile --force || {
     echo "❌ Compilation failed - push aborted"

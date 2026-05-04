@@ -84,7 +84,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
         if length(subs) == length(subjects) do
           BotArmyRuntime.Registry.register("job_scheduler", @subjects, @version)
-        Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
+          Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
           {:noreply, %{state | subscriptions: subs}}
         else
           Logger.error("Failed to subscribe to all Job topics")
@@ -137,7 +137,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
   @impl true
   def handle_info(:registry_heartbeat, state) do
-    if length(state.subscriptions) > 0 do
+    if state.subscriptions != [] do
       BotArmyRuntime.Registry.register("job_scheduler", @subjects, @version)
       Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
     end
