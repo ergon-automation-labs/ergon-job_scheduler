@@ -14,11 +14,12 @@ defmodule BotArmyJobScheduler.Application do
 
   @impl true
   def start(_type, _args) do
-    children = []
-    |> maybe_add_repo()
-    |> maybe_add_schedule_store()
-    |> maybe_add_scheduler()
-    |> maybe_add_consumer()
+    children =
+      []
+      |> maybe_add_repo()
+      |> maybe_add_schedule_store()
+      |> maybe_add_scheduler()
+      |> maybe_add_consumer()
 
     opts = [strategy: :one_for_one, name: BotArmyJobScheduler.Supervisor]
     Supervisor.start_link(children, opts)
@@ -33,7 +34,11 @@ defmodule BotArmyJobScheduler.Application do
   end
 
   defp maybe_add_scheduler(children) do
-    if @env == :test, do: children, else: [{BotArmyJobScheduler.Scheduler, []} | children]
+    if @env == :test do
+      children
+    else
+      [{BotArmyJobScheduler.PulsePublisher, []}, {BotArmyJobScheduler.Scheduler, []} | children]
+    end
   end
 
   defp maybe_add_consumer(children) do
