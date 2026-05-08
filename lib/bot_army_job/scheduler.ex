@@ -15,6 +15,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   # Check every minute
   @check_interval_ms 60_000
   @schema_sync_command "ops.schema_sync.run"
+  @para_daily_changed_command "ops.para_daily_changed.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -107,6 +108,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   defp run_schedule_command(schedule) do
     case schedule_value(schedule, "command", :command) do
       @schema_sync_command -> run_schema_sync_job(schedule)
+      @para_daily_changed_command -> run_para_daily_changed_job(schedule)
       _ -> publish_schedule_event(schedule)
     end
   end
@@ -153,6 +155,55 @@ defmodule BotArmyJobScheduler.Scheduler do
       Logger.error("Schema-sync job raised for schedule #{rescue_schedule_id}: #{inspect(error)}")
 
       {:error, {:schema_sync_exception, error}}
+  end
+
+  defp run_para_daily_changed_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+
+    project_ref =
+      System.get_env("JOB_SCHEDULER_PARA_PROJECT_REF", "fractional_contractor_readiness")
+
+    date = Date.utc_today() |> Date.to_iso8601()
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 300, 1) * 1000
+    port = System.get_env("PORT", "4222")
+
+    args = [
+      "bridge-para-daily-changed-smoke",
+      "PROJECT_REF=#{project_ref}",
+      "DATE=#{date}",
+      "PORT=#{port}"
+    ]
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "PARA daily-changed job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "PARA daily-changed job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:para_daily_changed_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "PARA daily-changed job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:para_daily_changed_exception, error}}
   end
 
   defp publish_schedule_event(schedule) do

@@ -24,6 +24,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
   @server __MODULE__
   @schema_sync_command "ops.schema_sync.run"
+  @para_daily_changed_command "ops.para_daily_changed.run"
 
   # API
 
@@ -119,7 +120,9 @@ defmodule BotArmyJobScheduler.ScheduleStore do
             Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
           end)
 
-        ensure_schema_sync_schedule(loaded_state)
+        loaded_state
+        |> ensure_schema_sync_schedule()
+        |> ensure_para_daily_changed_schedule()
       rescue
         _ ->
           Logger.warning(
@@ -358,6 +361,61 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed schema-sync schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_para_daily_changed_schedule(state) do
+    if para_daily_changed_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @para_daily_changed_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_para_daily_changed_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp para_daily_changed_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_PARA_DAILY_CHANGED", "true")
+    |> String.downcase()
+    |> Kernel.!=("false")
+  end
+
+  defp create_para_daily_changed_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "PARA Daily What Changed",
+          "description" => "Publishes bridge.para.daily.changed.create via monorepo Make target",
+          "cron_expression" =>
+            System.get_env("JOB_SCHEDULER_PARA_DAILY_CHANGED_CRON", "0 23 * * *"),
+          "command" => @para_daily_changed_command,
+          "timeout" =>
+            String.to_integer(System.get_env("JOB_SCHEDULER_PARA_DAILY_CHANGED_TIMEOUT", "300")),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default PARA daily-changed schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed PARA daily-changed schedule: #{inspect(reason)}")
         state
     end
   end
