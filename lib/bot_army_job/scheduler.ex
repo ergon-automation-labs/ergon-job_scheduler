@@ -16,6 +16,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   @check_interval_ms 60_000
   @schema_sync_command "ops.schema_sync.run"
   @para_daily_changed_command "ops.para_daily_changed.run"
+  @gtd_para_export_command "ops.gtd_para_export.run"
+  @daily_learning_podcast_command "ops.daily_learning_podcast.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -109,6 +111,8 @@ defmodule BotArmyJobScheduler.Scheduler do
     case schedule_value(schedule, "command", :command) do
       @schema_sync_command -> run_schema_sync_job(schedule)
       @para_daily_changed_command -> run_para_daily_changed_job(schedule)
+      @gtd_para_export_command -> run_gtd_para_export_job(schedule)
+      @daily_learning_podcast_command -> run_daily_learning_podcast_job(schedule)
       _ -> publish_schedule_event(schedule)
     end
   end
@@ -155,6 +159,52 @@ defmodule BotArmyJobScheduler.Scheduler do
       Logger.error("Schema-sync job raised for schedule #{rescue_schedule_id}: #{inspect(error)}")
 
       {:error, {:schema_sync_exception, error}}
+  end
+
+  defp run_gtd_para_export_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    para_root = System.get_env("PARA_SYNC_ROOT", "/Users/abby/Documents/personal_os")
+    bot_drop = System.get_env("PARA_SYNC_BOT_DROP", "para-bot/inbox")
+    port = System.get_env("PORT", "4222")
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 600, 1) * 1000
+
+    args = [
+      "gtd-para-export",
+      "PARA_SYNC_ROOT=#{para_root}",
+      "PARA_SYNC_BOT_DROP=#{bot_drop}",
+      "PORT=#{port}"
+    ]
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "GTD PARA export job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "GTD PARA export job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:gtd_para_export_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "GTD PARA export job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:gtd_para_export_exception, error}}
   end
 
   defp run_para_daily_changed_job(schedule) do
@@ -204,6 +254,73 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
 
       {:error, {:para_daily_changed_exception, error}}
+  end
+
+  defp run_daily_learning_podcast_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    port = System.get_env("PORT", "4222")
+    tenant_id = System.get_env("TENANT_ID", "00000000-0000-0000-0000-000000000001")
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 900, 1) * 1000
+    dry_run = truthy_env?("LEARNING_PODCAST_DRY_RUN")
+    invoke = not truthy_env?("LEARNING_PODCAST_NO_INVOKE")
+
+    args = [
+      "learning-podcast-job",
+      "PORT=#{port}",
+      "TENANT_ID=#{tenant_id}",
+      "TIMEOUT_SECONDS=#{div(timeout_ms, 1000)}"
+    ]
+
+    args =
+      if dry_run do
+        args ++ ["DRY_RUN=1"]
+      else
+        args
+      end
+
+    args =
+      if invoke do
+        args
+      else
+        args ++ ["INVOKE=0"]
+      end
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "Daily learning podcast job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "Daily learning podcast job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:daily_learning_podcast_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Daily learning podcast job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:daily_learning_podcast_exception, error}}
+  end
+
+  defp truthy_env?(key) do
+    System.get_env(key, "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
   end
 
   defp publish_schedule_event(schedule) do

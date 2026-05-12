@@ -25,6 +25,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @server __MODULE__
   @schema_sync_command "ops.schema_sync.run"
   @para_daily_changed_command "ops.para_daily_changed.run"
+  @gtd_para_export_command "ops.gtd_para_export.run"
+  @daily_learning_podcast_command "ops.daily_learning_podcast.run"
 
   # API
 
@@ -123,6 +125,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         loaded_state
         |> ensure_schema_sync_schedule()
         |> ensure_para_daily_changed_schedule()
+        |> ensure_gtd_para_export_schedule()
+        |> ensure_daily_learning_podcast_schedule()
       rescue
         _ ->
           Logger.warning(
@@ -391,6 +395,60 @@ defmodule BotArmyJobScheduler.ScheduleStore do
     |> Kernel.!=("false")
   end
 
+  defp ensure_gtd_para_export_schedule(state) do
+    if gtd_para_export_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @gtd_para_export_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_gtd_para_export_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp gtd_para_export_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_GTD_PARA_EXPORT", "true")
+    |> String.downcase()
+    |> Kernel.!=("false")
+  end
+
+  defp create_gtd_para_export_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "GTD PARA Markdown Export",
+          "description" => "Runs make gtd-para-export against the Obsidian-backed PARA tree",
+          "cron_expression" => System.get_env("JOB_SCHEDULER_GTD_PARA_EXPORT_CRON", "0 * * * *"),
+          "command" => @gtd_para_export_command,
+          "timeout" =>
+            String.to_integer(System.get_env("JOB_SCHEDULER_GTD_PARA_EXPORT_TIMEOUT", "600")),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default GTD PARA export schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed GTD PARA export schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
   defp create_para_daily_changed_schedule(state) do
     schedule_id = Ecto.UUID.generate()
 
@@ -416,6 +474,64 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed PARA daily-changed schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_daily_learning_podcast_schedule(state) do
+    if daily_learning_podcast_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @daily_learning_podcast_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_daily_learning_podcast_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp daily_learning_podcast_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_DAILY_LEARNING_PODCAST", "true")
+    |> String.downcase()
+    |> Kernel.!=("false")
+  end
+
+  defp create_daily_learning_podcast_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Daily Learning Podcast",
+          "description" =>
+            "Runs make learning-podcast-job from resources/learning/queue.md (resume after dry-run debugging)",
+          "cron_expression" =>
+            System.get_env("JOB_SCHEDULER_DAILY_LEARNING_PODCAST_CRON", "0 12 * * *"),
+          "command" => @daily_learning_podcast_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_DAILY_LEARNING_PODCAST_TIMEOUT", "900")
+            ),
+          "status" => System.get_env("JOB_SCHEDULER_DAILY_LEARNING_PODCAST_STATUS", "paused")
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default daily learning podcast schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed daily learning podcast schedule: #{inspect(reason)}")
         state
     end
   end

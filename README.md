@@ -56,6 +56,25 @@ Environment overrides:
 - `JOB_SCHEDULER_PARA_DAILY_CHANGED_TIMEOUT` (default `300`) - timeout in seconds for the make job.
 - `JOB_SCHEDULER_PARA_PROJECT_REF` (default `fractional_contractor_readiness`) - PARA project slug used in payload.
 
+## Built-in Daily Learning Podcast Job
+
+`bot_army_job_scheduler` seeds a recurring schedule for the learning podcast lane:
+
+- **Title:** `Daily Learning Podcast`
+- **Command:** `ops.daily_learning_podcast.run`
+- **Default cron:** `0 12 * * *` (UTC; ~06:00 America/Denver during MDT)
+- **Default status:** `paused` (resume after dry-run debugging)
+- **Execution:** runs `make learning-podcast-job` in `ELIXIR_BOTS_DIR`
+
+Environment overrides:
+
+- `JOB_SCHEDULER_ENABLE_DAILY_LEARNING_PODCAST` (default `true`) - set to `false` to disable seeding.
+- `JOB_SCHEDULER_DAILY_LEARNING_PODCAST_CRON` (default `0 12 * * *`) - custom cadence.
+- `JOB_SCHEDULER_DAILY_LEARNING_PODCAST_TIMEOUT` (default `900`) - timeout in seconds for the make job.
+- `JOB_SCHEDULER_DAILY_LEARNING_PODCAST_STATUS` (default `paused`) - initial schedule status.
+- `LEARNING_PODCAST_DRY_RUN` (default `false`) - when `true`, scheduler runs `DRY_RUN=1`.
+- `LEARNING_PODCAST_NO_INVOKE` (default `false`) - when `true`, scheduler runs `INVOKE=0`.
+
 ## Message Schemas
 
 Schemas are defined in `bot_army_schemas_job` and deployed to `/etc/bot_army/schemas/job/`
