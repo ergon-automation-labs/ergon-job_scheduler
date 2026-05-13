@@ -18,6 +18,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   @para_daily_changed_command "ops.para_daily_changed.run"
   @gtd_para_export_command "ops.gtd_para_export.run"
   @daily_learning_podcast_command "ops.daily_learning_podcast.run"
+  @para_inbox_media_ingest_command "ops.para_inbox_media_ingest.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -113,6 +114,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       @para_daily_changed_command -> run_para_daily_changed_job(schedule)
       @gtd_para_export_command -> run_gtd_para_export_job(schedule)
       @daily_learning_podcast_command -> run_daily_learning_podcast_job(schedule)
+      @para_inbox_media_ingest_command -> run_para_inbox_media_ingest_job(schedule)
       _ -> publish_schedule_event(schedule)
     end
   end
@@ -166,7 +168,7 @@ defmodule BotArmyJobScheduler.Scheduler do
     elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
     para_root = System.get_env("PARA_SYNC_ROOT", "/Users/abby/Documents/personal_os")
     bot_drop = System.get_env("PARA_SYNC_BOT_DROP", "para-bot/inbox")
-    port = System.get_env("PORT", "4222")
+    port = System.get_env("PORT", "4223")
     timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 600, 1) * 1000
 
     args = [
@@ -216,7 +218,7 @@ defmodule BotArmyJobScheduler.Scheduler do
 
     date = Date.utc_today() |> Date.to_iso8601()
     timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 300, 1) * 1000
-    port = System.get_env("PORT", "4222")
+    port = System.get_env("PORT", "4223")
 
     args = [
       "bridge-para-daily-changed-smoke",
@@ -259,7 +261,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   defp run_daily_learning_podcast_job(schedule) do
     schedule_id = schedule_value(schedule, "id", :id)
     elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
-    port = System.get_env("PORT", "4222")
+    port = System.get_env("PORT", "4223")
     tenant_id = System.get_env("TENANT_ID", "00000000-0000-0000-0000-000000000001")
     timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 900, 1) * 1000
     dry_run = truthy_env?("LEARNING_PODCAST_DRY_RUN")
@@ -315,6 +317,51 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
 
       {:error, {:daily_learning_podcast_exception, error}}
+  end
+
+  defp run_para_inbox_media_ingest_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    para_root = System.get_env("PARA_SYNC_ROOT", "/Users/abby/Documents/personal_os")
+    port = System.get_env("PORT", "4223")
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 900, 1) * 1000
+
+    args = [
+      "para-inbox-media-ingest-job",
+      "PARA_SYNC_ROOT=#{para_root}",
+      "PORT=#{port}",
+      "TIMEOUT_SECONDS=#{div(timeout_ms, 1000)}"
+    ]
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "PARA inbox media ingest job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "PARA inbox media ingest job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:para_inbox_media_ingest_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "PARA inbox media ingest job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:para_inbox_media_ingest_exception, error}}
   end
 
   defp truthy_env?(key) do

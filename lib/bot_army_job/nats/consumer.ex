@@ -25,7 +25,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   use GenServer
   require Logger
 
-  @nats_url System.get_env("NATS_URL", "nats://localhost:4222")
+  @nats_url System.get_env("NATS_URL", "nats://localhost:4223")
   @reconnect_delay_ms 5000
   @max_reconnect_retries 10
   @version Mix.Project.config()[:version]
