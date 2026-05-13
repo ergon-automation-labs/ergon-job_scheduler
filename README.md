@@ -94,6 +94,24 @@ Environment overrides:
 - `PARA_FS_WRITE_TOKEN` — if the `para.fs.write` responder requires auth, set the same token in `job_scheduler.env`.
 - `PORT` / `NATS_PORT` — broker port for scorecard publish + `para.fs.write` (default `4222`).
 
+## Built-in Human ops digest (PARA + Discord)
+
+When `JOB_SCHEDULER_ENABLE_HUMAN_OPS_DIGEST` is `true`/`1`/`yes`, the bot seeds a **weekly** schedule (UTC Monday 14:00 by default):
+
+- **Title:** `Human ops digest (PARA + Discord)`
+- **Command:** `ops.human_ops_digest.run`
+- **Default cron:** `0 14 * * 1` (UTC)
+- **Execution:** runs `make human-ops-digest-job` in `ELIXIR_BOTS_DIR` — PARA sync signal, `gtd.review.weekly`, orchestration snapshot, `risk-health`, then **`para.fs.write`** for markdown + JSON (canonical), `bridge.discord.message.send`, and a slim publish to `synapse.context.human_ops_digest.report`. By default nothing is written under `.cache/human_ops_digest/`; set **`HUMAN_OPS_DIGEST_MIRROR_TO_CACHE=1`** if you also want a local mirror.
+
+Environment overrides:
+
+- `JOB_SCHEDULER_ENABLE_HUMAN_OPS_DIGEST` (default `false`) — must be enabled to seed.
+- `JOB_SCHEDULER_HUMAN_OPS_DIGEST_CRON` (default `0 14 * * 1`).
+- `JOB_SCHEDULER_HUMAN_OPS_DIGEST_TIMEOUT` (default `3600`) — seconds for the combined `make` run.
+- `PARA_ROOT` / `PARA_SYNC_ROOT` — forwarded via `make` to `para-sync-signal` (see monorepo `human_ops_digest_report.py`).
+- `HUMAN_OPS_DIGEST_*` — Discord channel/username, PARA relative paths, `HUMAN_OPS_DIGEST_NO_SYNAPSE` / `_NO_DISCORD` / `_NO_PARA` (set `1` to skip legs), `HUMAN_OPS_DIGEST_MIRROR_TO_CACHE` (set `1` to also write `.cache/human_ops_digest/latest_*`).
+- `PARA_FS_WRITE_TOKEN` — same as scorecard lane when `para.fs.write` requires auth.
+
 ## Message Schemas
 
 Schemas are defined in `bot_army_schemas_job` and deployed to `/etc/bot_army/schemas/job/`
