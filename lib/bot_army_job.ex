@@ -16,7 +16,7 @@ defmodule BotArmyJobScheduler do
   - `job.status.update` - Update job status
   """
 
-  @version "0.1.0"
+  @version "0.1.25"
 
   def version do
     @version

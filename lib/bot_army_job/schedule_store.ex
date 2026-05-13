@@ -27,6 +27,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @para_daily_changed_command "ops.para_daily_changed.run"
   @gtd_para_export_command "ops.gtd_para_export.run"
   @daily_learning_podcast_command "ops.daily_learning_podcast.run"
+  @para_inbox_media_ingest_command "ops.para_inbox_media_ingest.run"
+  @synapse_scorecard_signals_command "ops.synapse_scorecard_signals.run"
 
   # API
 
@@ -127,6 +129,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         |> ensure_para_daily_changed_schedule()
         |> ensure_gtd_para_export_schedule()
         |> ensure_daily_learning_podcast_schedule()
+        |> ensure_para_inbox_media_ingest_schedule()
+        |> ensure_synapse_scorecard_signals_schedule()
       rescue
         _ ->
           Logger.warning(
@@ -532,6 +536,125 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed daily learning podcast schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_para_inbox_media_ingest_schedule(state) do
+    if para_inbox_media_ingest_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @para_inbox_media_ingest_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_para_inbox_media_ingest_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp para_inbox_media_ingest_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_PARA_INBOX_MEDIA_INGEST", "true")
+    |> String.downcase()
+    |> Kernel.!=("false")
+  end
+
+  defp create_para_inbox_media_ingest_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "PARA Inbox YouTube Media Ingest",
+          "description" =>
+            "Runs make para-inbox-media-ingest-job against inbox/capture.md via bridge + para.fs.write",
+          "cron_expression" =>
+            System.get_env("JOB_SCHEDULER_PARA_INBOX_MEDIA_INGEST_CRON", "*/30 * * * *"),
+          "command" => @para_inbox_media_ingest_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_PARA_INBOX_MEDIA_INGEST_TIMEOUT", "900")
+            ),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default PARA inbox media ingest schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed PARA inbox media ingest schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_synapse_scorecard_signals_schedule(state) do
+    if synapse_scorecard_signals_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @synapse_scorecard_signals_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_synapse_scorecard_signals_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp synapse_scorecard_signals_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_SYNAPSE_SCORECARD_SIGNALS", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_synapse_scorecard_signals_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Synapse scorecard signals + PARA",
+          "description" =>
+            "Runs make synapse-scorecard-signals-with-para (LLM + agentic NATS + para.fs.write copies)",
+          "cron_expression" =>
+            System.get_env(
+              "JOB_SCHEDULER_SYNAPSE_SCORECARD_SIGNALS_CRON",
+              "30 13 * * *"
+            ),
+          "command" => @synapse_scorecard_signals_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_SYNAPSE_SCORECARD_SIGNALS_TIMEOUT", "3600")
+            ),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Synapse scorecard + PARA schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Synapse scorecard signals schedule: #{inspect(reason)}")
         state
     end
   end

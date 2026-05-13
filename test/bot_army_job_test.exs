@@ -4,6 +4,6 @@ defmodule BotArmyJobSchedulerTest do
   doctest BotArmyJobScheduler
 
   test "version" do
-    assert BotArmyJobScheduler.version() == "0.1.0"
+    assert BotArmyJobScheduler.version() == "0.1.25"
   end
 end
