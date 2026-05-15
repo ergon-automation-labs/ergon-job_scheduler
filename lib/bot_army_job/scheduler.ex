@@ -20,6 +20,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   @daily_learning_podcast_command "ops.daily_learning_podcast.run"
   @para_inbox_media_ingest_command "ops.para_inbox_media_ingest.run"
   @synapse_scorecard_signals_command "ops.synapse_scorecard_signals.run"
+  @human_ops_digest_command "ops.human_ops_digest.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -117,6 +118,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       @daily_learning_podcast_command -> run_daily_learning_podcast_job(schedule)
       @para_inbox_media_ingest_command -> run_para_inbox_media_ingest_job(schedule)
       @synapse_scorecard_signals_command -> run_synapse_scorecard_signals_job(schedule)
+      @human_ops_digest_command -> run_human_ops_digest_job(schedule)
       _ -> publish_schedule_event(schedule)
     end
   end
@@ -407,6 +409,49 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
 
       {:error, {:synapse_scorecard_signals_exception, error}}
+  end
+
+  defp run_human_ops_digest_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    port = System.get_env("PORT", System.get_env("NATS_PORT", "4222"))
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 3600, 1) * 1000
+
+    args = [
+      "human-ops-digest-job",
+      "NATS_PORT=#{port}",
+      "PORT=#{port}"
+    ]
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "Human ops digest job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "Human ops digest job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:human_ops_digest_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Human ops digest job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:human_ops_digest_exception, error}}
   end
 
   defp truthy_env?(key) do

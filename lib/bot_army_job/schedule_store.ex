@@ -29,6 +29,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @daily_learning_podcast_command "ops.daily_learning_podcast.run"
   @para_inbox_media_ingest_command "ops.para_inbox_media_ingest.run"
   @synapse_scorecard_signals_command "ops.synapse_scorecard_signals.run"
+  @human_ops_digest_command "ops.human_ops_digest.run"
 
   # API
 
@@ -131,6 +132,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         |> ensure_daily_learning_podcast_schedule()
         |> ensure_para_inbox_media_ingest_schedule()
         |> ensure_synapse_scorecard_signals_schedule()
+        |> ensure_human_ops_digest_schedule()
       rescue
         _ ->
           Logger.warning(
@@ -655,6 +657,65 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed Synapse scorecard signals schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_human_ops_digest_schedule(state) do
+    if human_ops_digest_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @human_ops_digest_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_human_ops_digest_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp human_ops_digest_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_HUMAN_OPS_DIGEST", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_human_ops_digest_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Human ops digest (PARA + Discord)",
+          "description" =>
+            "Runs make human-ops-digest-job (PARA sync + weekly GTD + orchestration + risk-health → PARA + Discord + Synapse)",
+          "cron_expression" =>
+            System.get_env(
+              "JOB_SCHEDULER_HUMAN_OPS_DIGEST_CRON",
+              "0 14 * * 1"
+            ),
+          "command" => @human_ops_digest_command,
+          "timeout" =>
+            String.to_integer(System.get_env("JOB_SCHEDULER_HUMAN_OPS_DIGEST_TIMEOUT", "3600")),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default human ops digest schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed human ops digest schedule: #{inspect(reason)}")
         state
     end
   end
