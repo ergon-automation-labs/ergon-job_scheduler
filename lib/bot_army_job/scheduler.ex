@@ -21,6 +21,9 @@ defmodule BotArmyJobScheduler.Scheduler do
   @para_inbox_media_ingest_command "ops.para_inbox_media_ingest.run"
   @synapse_scorecard_signals_command "ops.synapse_scorecard_signals.run"
   @human_ops_digest_command "ops.human_ops_digest.run"
+  @desk_operator_snapshot_command "bot.army.skills.desk_operator_snapshot.generate"
+  @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
+  @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -112,15 +115,83 @@ defmodule BotArmyJobScheduler.Scheduler do
 
   defp run_schedule_command(schedule) do
     case schedule_value(schedule, "command", :command) do
-      @schema_sync_command -> run_schema_sync_job(schedule)
-      @para_daily_changed_command -> run_para_daily_changed_job(schedule)
-      @gtd_para_export_command -> run_gtd_para_export_job(schedule)
-      @daily_learning_podcast_command -> run_daily_learning_podcast_job(schedule)
-      @para_inbox_media_ingest_command -> run_para_inbox_media_ingest_job(schedule)
-      @synapse_scorecard_signals_command -> run_synapse_scorecard_signals_job(schedule)
-      @human_ops_digest_command -> run_human_ops_digest_job(schedule)
-      _ -> publish_schedule_event(schedule)
+      @schema_sync_command ->
+        run_schema_sync_job(schedule)
+
+      @para_daily_changed_command ->
+        run_para_daily_changed_job(schedule)
+
+      @gtd_para_export_command ->
+        run_gtd_para_export_job(schedule)
+
+      @daily_learning_podcast_command ->
+        run_daily_learning_podcast_job(schedule)
+
+      @para_inbox_media_ingest_command ->
+        run_para_inbox_media_ingest_job(schedule)
+
+      @synapse_scorecard_signals_command ->
+        run_synapse_scorecard_signals_job(schedule)
+
+      @human_ops_digest_command ->
+        run_human_ops_digest_job(schedule)
+
+      @desk_operator_snapshot_command ->
+        run_skill_job(schedule)
+
+      @bridge_health_snapshot_command ->
+        run_skill_job(schedule)
+
+      @bridge_chronicle_daily_brief_command ->
+        run_bridge_chronicle_daily_brief_job(schedule)
+
+      command ->
+        if String.starts_with?(command, "bot.army.skills.") do
+          run_skill_job(schedule)
+        else
+          publish_schedule_event(schedule)
+        end
     end
+  end
+
+  defp run_bridge_chronicle_daily_brief_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 60, 1) * 1000
+
+    args = [
+      "bridge-chronicle-daily-brief-write"
+    ]
+
+    case System.cmd("make", args,
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "Bridge chronicle daily brief job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "Bridge chronicle daily brief job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:bridge_chronicle_daily_brief_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Bridge chronicle daily brief job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:bridge_chronicle_daily_brief_exception, error}}
   end
 
   defp run_schema_sync_job(schedule) do
@@ -452,6 +523,49 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
 
       {:error, {:human_ops_digest_exception, error}}
+  end
+
+  defp run_skill_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    subject = schedule_value(schedule, "command", :command)
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 30, 1) * 1000
+
+    Logger.info("Running skill job #{schedule_id}: NATS request to #{subject}")
+
+    payload = %{}
+
+    case safe_nats_request(subject, payload, timeout_ms) do
+      {:ok, response} ->
+        ok? = get_in(response, ["ok"]) == true or get_in(response, ["status"]) == "success"
+
+        if ok? do
+          Logger.info("Skill job #{schedule_id} completed successfully")
+          :ok
+        else
+          error = get_in(response, ["error"]) || "Unknown skill error"
+          Logger.error("Skill job #{schedule_id} returned error: #{error}")
+          {:error, {:skill_error, error}}
+        end
+
+      {:error, reason} ->
+        Logger.error("Skill job #{schedule_id} NATS request failed: #{inspect(reason)}")
+        {:error, {:nats_request_failed, reason}}
+    end
+  end
+
+  defp safe_nats_request(subject, payload, timeout_ms) do
+    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000),
+         {:ok, json} <- Jason.encode(payload),
+         {:ok, response} <- Gnat.request(conn, subject, json, receive_timeout: timeout_ms) do
+      case Jason.decode(response.body) do
+        {:ok, decoded} -> {:ok, decoded}
+        {:error, reason} -> {:error, {:decode_failed, reason}}
+      end
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    e -> {:error, {:exception, e}}
   end
 
   defp truthy_env?(key) do

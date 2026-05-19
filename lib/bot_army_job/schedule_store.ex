@@ -30,6 +30,9 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @para_inbox_media_ingest_command "ops.para_inbox_media_ingest.run"
   @synapse_scorecard_signals_command "ops.synapse_scorecard_signals.run"
   @human_ops_digest_command "ops.human_ops_digest.run"
+  @desk_operator_snapshot_command "bot.army.skills.desk_operator_snapshot.generate"
+  @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
+  @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
 
   # API
 
@@ -133,6 +136,9 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         |> ensure_para_inbox_media_ingest_schedule()
         |> ensure_synapse_scorecard_signals_schedule()
         |> ensure_human_ops_digest_schedule()
+        |> ensure_desk_operator_snapshot_schedule()
+        |> ensure_bridge_health_snapshot_schedule()
+        |> ensure_bridge_chronicle_daily_brief_schedule()
       rescue
         _ ->
           Logger.warning(
@@ -716,6 +722,189 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed human ops digest schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_desk_operator_snapshot_schedule(state) do
+    if desk_operator_snapshot_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @desk_operator_snapshot_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_desk_operator_snapshot_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp desk_operator_snapshot_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_DESK_OPERATOR_SNAPSHOT", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_desk_operator_snapshot_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Desk Operator Snapshot",
+          "description" =>
+            "NATS request to bot.army.skills.desk_operator_snapshot.generate — deterministic desk assembly for operator reports",
+          "cron_expression" =>
+            System.get_env(
+              "JOB_SCHEDULER_DESK_OPERATOR_SNAPSHOT_CRON",
+              "0 8 * * *"
+            ),
+          "command" => @desk_operator_snapshot_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_DESK_OPERATOR_SNAPSHOT_TIMEOUT", "60")
+            ),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default desk operator snapshot schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed desk operator snapshot schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_bridge_health_snapshot_schedule(state) do
+    if bridge_health_snapshot_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @bridge_health_snapshot_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_bridge_health_snapshot_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp bridge_health_snapshot_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_BRIDGE_HEALTH_SNAPSHOT", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_bridge_health_snapshot_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Bridge Health Snapshot",
+          "description" =>
+            "NATS request to bot.army.skills.bridge_health_snapshot.generate — health snapshot written to PARA",
+          "cron_expression" =>
+            System.get_env(
+              "JOB_SCHEDULER_BRIDGE_HEALTH_SNAPSHOT_CRON",
+              "*/30 * * * *"
+            ),
+          "command" => @bridge_health_snapshot_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_BRIDGE_HEALTH_SNAPSHOT_TIMEOUT", "60")
+            ),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default bridge health snapshot schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed bridge health snapshot schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_bridge_chronicle_daily_brief_schedule(state) do
+    if bridge_chronicle_daily_brief_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @bridge_chronicle_daily_brief_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_bridge_chronicle_daily_brief_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp bridge_chronicle_daily_brief_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_BRIDGE_CHRONICLE_DAILY_BRIEF", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_bridge_chronicle_daily_brief_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Bridge Chronicle Daily Brief",
+          "description" =>
+            "Runs make bridge-chronicle-daily-brief-write — writes daily brief to para-bot/inbox/daily-brief.md",
+          "cron_expression" =>
+            System.get_env(
+              "JOB_SCHEDULER_BRIDGE_CHRONICLE_DAILY_BRIEF_CRON",
+              "0 7 * * *"
+            ),
+          "command" => @bridge_chronicle_daily_brief_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_BRIDGE_CHRONICLE_DAILY_BRIEF_TIMEOUT", "120")
+            ),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default bridge chronicle daily brief schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed bridge chronicle daily brief schedule: #{inspect(reason)}")
         state
     end
   end
