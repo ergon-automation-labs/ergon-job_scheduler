@@ -54,7 +54,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       case BotArmyJobScheduler.ScheduleStore.list() do
         {:ok, schedules} ->
           schedules
-          |> Enum.filter(&is_due?(&1, now))
+          |> Enum.filter(&due?(&1, now))
           |> Enum.each(&execute_schedule/1)
 
         {:error, reason} ->
@@ -66,7 +66,7 @@ defmodule BotArmyJobScheduler.Scheduler do
     end
   end
 
-  defp is_due?(schedule, now) do
+  defp due?(schedule, now) do
     case schedule_value(schedule, "status", :status) do
       "active" ->
         case Crontab.CronExpression.parse(
