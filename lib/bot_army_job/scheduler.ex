@@ -24,6 +24,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   @desk_operator_snapshot_command "bot.army.skills.desk_operator_snapshot.generate"
   @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
+  @fitness_plan_generate_command "ops.fitness_plan_generate.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -145,6 +146,9 @@ defmodule BotArmyJobScheduler.Scheduler do
       @bridge_chronicle_daily_brief_command ->
         run_bridge_chronicle_daily_brief_job(schedule)
 
+      @fitness_plan_generate_command ->
+        run_fitness_plan_generate_job(schedule)
+
       command ->
         if String.starts_with?(command, "bot.army.skills.") do
           run_skill_job(schedule)
@@ -192,6 +196,43 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
 
       {:error, {:bridge_chronicle_daily_brief_exception, error}}
+  end
+
+  defp run_fitness_plan_generate_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    port = System.get_env("PORT", System.get_env("NATS_PORT", "4222"))
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 30, 1) * 1000
+
+    case System.cmd("make", ["fitness-plan-generate", "PORT=#{port}"],
+           cd: elixir_bots_dir,
+           stderr_to_stdout: true,
+           timeout: timeout_ms
+         ) do
+      {output, 0} ->
+        Logger.info(
+          "Fitness plan generate published for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "Fitness plan generate failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:fitness_plan_generate_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Fitness plan generate raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:fitness_plan_generate_exception, error}}
   end
 
   defp run_schema_sync_job(schedule) do
