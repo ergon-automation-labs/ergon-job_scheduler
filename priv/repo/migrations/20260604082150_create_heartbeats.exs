@@ -2,7 +2,7 @@ defmodule BotArmyJobScheduler.Repo.Migrations.CreateHeartbeats do
   use Ecto.Migration
 
   def change do
-    create table(:heartbeats, primary_key: false) do
+    create_if_not_exists table(:heartbeats, primary_key: false) do
       add :id, :uuid, primary_key: true
       add :bot_id, :string, null: false
       add :service, :string, null: false
@@ -18,9 +18,9 @@ defmodule BotArmyJobScheduler.Repo.Migrations.CreateHeartbeats do
       timestamps(type: :utc_datetime)
     end
 
-    create unique_index(:heartbeats, [:service, :tenant_id])
-    create index(:heartbeats, [:bot_id])
-    create index(:heartbeats, [:tenant_id])
-    create index(:heartbeats, [:service])
+    create_if_not_exists unique_index(:heartbeats, [:service, :tenant_id])
+    create_if_not_exists index(:heartbeats, [:bot_id])
+    create_if_not_exists index(:heartbeats, [:tenant_id])
+    create_if_not_exists index(:heartbeats, [:service])
   end
 end
