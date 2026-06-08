@@ -3,8 +3,7 @@ import Config
 # Logger with correlation_id support
 config :logger,
   level: :info,
-  backends: [:console],
-  default_formatter: {BotArmyRuntime.LoggerFormatter, []}
+  backends: [:console]
 
 config :logger, :console,
   format: {BotArmyRuntime.LoggerFormatter, []},
