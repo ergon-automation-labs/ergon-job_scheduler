@@ -1,5 +1,15 @@
 import Config
 
+# Logger with correlation_id support
+config :logger,
+  level: :info,
+  backends: [:console],
+  default_formatter: {BotArmyRuntime.LoggerFormatter, []}
+
+config :logger, :console,
+  format: {BotArmyRuntime.LoggerFormatter, []},
+  metadata: [:correlation_id]
+
 # Ecto repositories for migrations
 config :bot_army_job, ecto_repos: [BotArmyJobScheduler.Repo]
 
@@ -16,3 +26,4 @@ config :bot_army_job, BotArmyJobScheduler.Repo,
 if File.exists?("config/#{Mix.env()}.exs") do
   import_config "#{Mix.env()}.exs"
 end
+
