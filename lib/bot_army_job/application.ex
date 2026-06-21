@@ -16,10 +16,10 @@ defmodule BotArmyJobScheduler.Application do
   def start(_type, _args) do
     children =
       []
-      |> maybe_add_repo()
-      |> maybe_add_schedule_store()
-      |> maybe_add_scheduler()
       |> maybe_add_consumer()
+      |> maybe_add_scheduler()
+      |> maybe_add_schedule_store()
+      |> maybe_add_repo()
 
     opts = [strategy: :one_for_one, name: BotArmyJobScheduler.Supervisor]
     Supervisor.start_link(children, opts)
