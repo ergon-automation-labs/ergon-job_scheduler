@@ -21,8 +21,9 @@ config :bot_army_job, BotArmyJobScheduler.Repo,
   password: System.get_env("BOT_ARMY_JOB_DB_PASSWORD", "postgres"),
   pool_size: 10
 
+config :bot_army_library_runtime, personality_repo: BotArmyJobScheduler.Repo
+
 # Import environment-specific config
 if File.exists?("config/#{Mix.env()}.exs") do
   import_config "#{Mix.env()}.exs"
 end
-
