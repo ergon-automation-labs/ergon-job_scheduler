@@ -119,54 +119,88 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @impl true
   def init(_opts) do
     Logger.info("ScheduleStore started")
-    # Load all schedules from database into GenServer state.
-    # Retry briefly: at boot the Ecto pool may not be ready the instant init runs,
-    # and swallowing the first failure leaves the scheduler with empty in-memory
-    # state (no schedules fire) and skips the ensure_* seed chain (new schedules
-    # never get created). Up to 10 attempts with 1s backoff before giving up.
+    # Load all schedules from database into GenServer state, then run the
+    # ensure_* seed chain (which creates any missing schedules, e.g.
+    # memory_gardener). The DB is reached through an SSH tunnel to a K8s
+    # NodePort and may not be reachable the instant init runs, so retry with
+    # backoff. If it still fails after 10 attempts, start empty and schedule a
+    # background self-heal (:retry_load) so the bot doesn't sit permanently
+    # with no schedules in memory once the DB comes back.
     state =
       Enum.reduce_while(1..10, nil, fn attempt, _acc ->
-        try do
-          schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
+        case load_and_seed() do
+          {:ok, loaded_state} ->
+            if attempt > 1,
+              do: Logger.info("ScheduleStore loaded from database on attempt #{attempt}")
 
-          loaded_state =
-            Enum.reduce(schedules, %{}, fn schedule, acc ->
-              Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
-            end)
+            {:halt, loaded_state}
 
-          if attempt > 1,
-            do: Logger.info("ScheduleStore loaded from database on attempt #{attempt}")
-
-          {:halt,
-           loaded_state
-           |> ensure_schema_sync_schedule()
-           |> ensure_para_daily_changed_schedule()
-           |> ensure_gtd_para_export_schedule()
-           |> ensure_daily_learning_podcast_schedule()
-           |> ensure_para_inbox_media_ingest_schedule()
-           |> ensure_synapse_scorecard_signals_schedule()
-           |> ensure_human_ops_digest_schedule()
-           |> ensure_desk_operator_snapshot_schedule()
-           |> ensure_bridge_health_snapshot_schedule()
-           |> ensure_bridge_chronicle_daily_brief_schedule()
-           |> ensure_fitness_plan_generate_schedule()
-           |> ensure_memory_gardener_schedule()}
-        rescue
-          _ ->
+          {:error, reason} ->
             if attempt < 10 do
               Process.sleep(1000)
               {:cont, nil}
             else
               Logger.warning(
-                "Could not load schedules from database after 10 attempts (database unavailable). Starting with empty state."
+                "Could not load schedules from database after 10 attempts (#{reason}). " <>
+                  "Starting with empty state; will retry in background."
               )
 
+              schedule_retry_load()
               {:halt, %{}}
             end
         end
       end)
 
     {:ok, state}
+  end
+
+  @impl true
+  def handle_info(:retry_load, state) do
+    case load_and_seed() do
+      {:ok, loaded_state} ->
+        Logger.info("ScheduleStore recovered from database via background retry")
+        {:noreply, loaded_state}
+
+      {:error, reason} ->
+        Logger.warning("Background schedule load retry failed (#{reason}); will retry again")
+        schedule_retry_load()
+        {:noreply, state}
+    end
+  end
+
+  defp schedule_retry_load do
+    Process.send_after(self(), :retry_load, 15_000)
+  end
+
+  # Load all schedules from the database into a map and run the ensure_* seed
+  # chain. Returns {:ok, state} on success or {:error, reason} if the database
+  # is unavailable.
+  defp load_and_seed do
+    try do
+      schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
+
+      loaded_state =
+        Enum.reduce(schedules, %{}, fn schedule, acc ->
+          Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
+        end)
+
+      {:ok,
+       loaded_state
+       |> ensure_schema_sync_schedule()
+       |> ensure_para_daily_changed_schedule()
+       |> ensure_gtd_para_export_schedule()
+       |> ensure_daily_learning_podcast_schedule()
+       |> ensure_para_inbox_media_ingest_schedule()
+       |> ensure_synapse_scorecard_signals_schedule()
+       |> ensure_human_ops_digest_schedule()
+       |> ensure_desk_operator_snapshot_schedule()
+       |> ensure_bridge_health_snapshot_schedule()
+       |> ensure_bridge_chronicle_daily_brief_schedule()
+       |> ensure_fitness_plan_generate_schedule()
+       |> ensure_memory_gardener_schedule()}
+    rescue
+      e -> {:error, Exception.message(e)}
+    end
   end
 
   @impl true
