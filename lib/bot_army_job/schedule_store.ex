@@ -1048,6 +1048,25 @@ defmodule BotArmyJobScheduler.ScheduleStore do
     |> Kernel.in(["1", "true", "yes"])
   end
 
+  # Read an env var as a string, stripping the double-quotes bot_wrapper.sh
+  # leaves on Salt-templated values (eval export KEY='"value"'). See
+  # memory_gardener_enabled?/0 for the root-cause note.
+  defp env_string(key, default) do
+    case System.get_env(key) do
+      nil -> default
+      val -> val |> String.trim() |> String.trim("\"")
+    end
+  end
+
+  # Read an env var as an integer, stripping the wrapper's double-quotes first
+  # so String.to_integer("\"300\"") doesn't raise.
+  defp env_int(key, default) do
+    case System.get_env(key) do
+      nil -> default
+      val -> val |> String.trim() |> String.trim("\"") |> String.to_integer()
+    end
+  end
+
   defp create_memory_gardener_schedule(state) do
     schedule_id = Ecto.UUID.generate()
 
@@ -1058,10 +1077,9 @@ defmodule BotArmyJobScheduler.ScheduleStore do
           "title" => "Memory Gardener Nightly Run",
           "description" =>
             "Runs make memory-gardener-run — LLM-scored archive of completed-work memories to PARA with tombstones",
-          "cron_expression" => System.get_env("JOB_SCHEDULER_MEMORY_GARDENER_CRON", "17 3 * * *"),
+          "cron_expression" => env_string("JOB_SCHEDULER_MEMORY_GARDENER_CRON", "17 3 * * *"),
           "command" => @memory_gardener_command,
-          "timeout" =>
-            String.to_integer(System.get_env("JOB_SCHEDULER_MEMORY_GARDENER_TIMEOUT", "300")),
+          "timeout" => env_int("JOB_SCHEDULER_MEMORY_GARDENER_TIMEOUT", 300),
           "status" => "active"
         }
       )
