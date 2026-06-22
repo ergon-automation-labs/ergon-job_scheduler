@@ -71,7 +71,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   defp due?(schedule, now) do
     case schedule_value(schedule, "status", :status) do
       "active" ->
-        case Crontab.CronExpression.parse(
+        case Crontab.CronExpression.Parser.parse(
                schedule_value(schedule, "cron_expression", :cron_expression)
              ) do
           {:ok, cron} ->
