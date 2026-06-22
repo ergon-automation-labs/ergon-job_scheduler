@@ -34,6 +34,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
+  @memory_gardener_command "ops.memory_gardener.run"
 
   # API
 
@@ -141,6 +142,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         |> ensure_bridge_health_snapshot_schedule()
         |> ensure_bridge_chronicle_daily_brief_schedule()
         |> ensure_fitness_plan_generate_schedule()
+        |> ensure_memory_gardener_schedule()
       rescue
         _ ->
           Logger.warning(
@@ -963,6 +965,61 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed fitness plan generate schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_memory_gardener_schedule(state) do
+    if memory_gardener_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @memory_gardener_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_memory_gardener_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp memory_gardener_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_MEMORY_GARDENER", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_memory_gardener_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Memory Gardener Nightly Run",
+          "description" =>
+            "Runs make memory-gardener-run — LLM-scored archive of completed-work memories to PARA with tombstones",
+          "cron_expression" => System.get_env("JOB_SCHEDULER_MEMORY_GARDENER_CRON", "17 3 * * *"),
+          "command" => @memory_gardener_command,
+          "timeout" =>
+            String.to_integer(System.get_env("JOB_SCHEDULER_MEMORY_GARDENER_TIMEOUT", "300")),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded memory gardener schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed memory gardener schedule: #{inspect(reason)}")
         state
     end
   end
