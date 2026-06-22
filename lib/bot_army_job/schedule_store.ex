@@ -990,7 +990,12 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   end
 
   defp memory_gardener_enabled? do
+    # bot_wrapper.sh sources the env file with `eval export KEY='"value"'`, which
+    # leaves the Salt template's double-quotes on the value (e.g. "\"true\"").
+    # Strip them so the enable flag is read correctly.
     System.get_env("JOB_SCHEDULER_ENABLE_MEMORY_GARDENER", "false")
+    |> String.trim()
+    |> String.trim("\"")
     |> String.downcase()
     |> Kernel.in(["1", "true", "yes"])
   end
