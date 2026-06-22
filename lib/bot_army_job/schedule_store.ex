@@ -119,38 +119,52 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @impl true
   def init(_opts) do
     Logger.info("ScheduleStore started")
-    # Load all schedules from database into GenServer state
-    # Gracefully handle database unavailability (e.g., in tests)
+    # Load all schedules from database into GenServer state.
+    # Retry briefly: at boot the Ecto pool may not be ready the instant init runs,
+    # and swallowing the first failure leaves the scheduler with empty in-memory
+    # state (no schedules fire) and skips the ensure_* seed chain (new schedules
+    # never get created). Up to 10 attempts with 1s backoff before giving up.
     state =
-      try do
-        schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
+      Enum.reduce_while(1..10, nil, fn attempt, _acc ->
+        try do
+          schedules = BotArmyJobScheduler.Repo.all(BotArmyJobScheduler.Schemas.Schedule)
 
-        loaded_state =
-          Enum.reduce(schedules, %{}, fn schedule, acc ->
-            Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
-          end)
+          loaded_state =
+            Enum.reduce(schedules, %{}, fn schedule, acc ->
+              Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
+            end)
 
-        loaded_state
-        |> ensure_schema_sync_schedule()
-        |> ensure_para_daily_changed_schedule()
-        |> ensure_gtd_para_export_schedule()
-        |> ensure_daily_learning_podcast_schedule()
-        |> ensure_para_inbox_media_ingest_schedule()
-        |> ensure_synapse_scorecard_signals_schedule()
-        |> ensure_human_ops_digest_schedule()
-        |> ensure_desk_operator_snapshot_schedule()
-        |> ensure_bridge_health_snapshot_schedule()
-        |> ensure_bridge_chronicle_daily_brief_schedule()
-        |> ensure_fitness_plan_generate_schedule()
-        |> ensure_memory_gardener_schedule()
-      rescue
-        _ ->
-          Logger.warning(
-            "Could not load schedules from database (database unavailable). Starting with empty state."
-          )
+          if attempt > 1,
+            do: Logger.info("ScheduleStore loaded from database on attempt #{attempt}")
 
-          %{}
-      end
+          {:halt,
+           loaded_state
+           |> ensure_schema_sync_schedule()
+           |> ensure_para_daily_changed_schedule()
+           |> ensure_gtd_para_export_schedule()
+           |> ensure_daily_learning_podcast_schedule()
+           |> ensure_para_inbox_media_ingest_schedule()
+           |> ensure_synapse_scorecard_signals_schedule()
+           |> ensure_human_ops_digest_schedule()
+           |> ensure_desk_operator_snapshot_schedule()
+           |> ensure_bridge_health_snapshot_schedule()
+           |> ensure_bridge_chronicle_daily_brief_schedule()
+           |> ensure_fitness_plan_generate_schedule()
+           |> ensure_memory_gardener_schedule()}
+        rescue
+          _ ->
+            if attempt < 10 do
+              Process.sleep(1000)
+              {:cont, nil}
+            else
+              Logger.warning(
+                "Could not load schedules from database after 10 attempts (database unavailable). Starting with empty state."
+              )
+
+              {:halt, %{}}
+            end
+        end
+      end)
 
     {:ok, state}
   end
