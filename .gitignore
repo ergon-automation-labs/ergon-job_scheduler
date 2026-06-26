@@ -4,6 +4,7 @@
 /.cache/
 /doc/
 erl_crash.dump
+mix.lock
 .env
 .env.local
 .env.*.local
@@ -22,3 +23,4 @@ erl_crash.dump
 *.crash
 *.tar.gz
 *.tar.xz
+_build_cursor_test/
