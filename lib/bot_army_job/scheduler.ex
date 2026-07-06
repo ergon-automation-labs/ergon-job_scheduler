@@ -25,7 +25,6 @@ defmodule BotArmyJobScheduler.Scheduler do
   @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
-  @memory_gardener_command "ops.memory_gardener.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -150,9 +149,6 @@ defmodule BotArmyJobScheduler.Scheduler do
       @fitness_plan_generate_command ->
         run_fitness_plan_generate_job(schedule)
 
-      @memory_gardener_command ->
-        run_memory_gardener_job(schedule)
-
       command ->
         if String.starts_with?(command, "bot.army.skills.") do
           run_skill_job(schedule)
@@ -171,11 +167,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "bridge-chronicle-daily-brief-write"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "Bridge chronicle daily brief job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -208,10 +200,10 @@ defmodule BotArmyJobScheduler.Scheduler do
     port = System.get_env("PORT", System.get_env("NATS_PORT", "4222"))
     timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 30, 1) * 1000
 
-    case System.cmd("make", ["fitness-plan-generate", "PORT=#{port}"],
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
+    case make_cmd(
+           ["fitness-plan-generate", "PORT=#{port}"],
+           [cd: elixir_bots_dir, stderr_to_stdout: true],
+           timeout_ms
          ) do
       {output, 0} ->
         Logger.info(
@@ -239,43 +231,6 @@ defmodule BotArmyJobScheduler.Scheduler do
       {:error, {:fitness_plan_generate_exception, error}}
   end
 
-  defp run_memory_gardener_job(schedule) do
-    schedule_id = schedule_value(schedule, "id", :id)
-    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
-    # Up to MEMORY_GARDEN_MAX_CANDIDATES LLM calls (~6s each) + scan + PARA writes.
-    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 300, 1) * 1000
-
-    case System.cmd("make", ["memory-gardener-run"],
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
-      {output, 0} ->
-        Logger.info(
-          "Memory gardener job completed for schedule #{schedule_id}: #{String.trim(output)}"
-        )
-
-        :ok
-
-      {output, exit_code} ->
-        Logger.error(
-          "Memory gardener job failed for schedule #{schedule_id} " <>
-            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
-        )
-
-        {:error, {:memory_gardener_failed, exit_code}}
-    end
-  rescue
-    error ->
-      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
-
-      Logger.error(
-        "Memory gardener job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
-      )
-
-      {:error, {:memory_gardener_exception, error}}
-  end
-
   defp run_schema_sync_job(schedule) do
     schedule_id = schedule_value(schedule, "id", :id)
     elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
@@ -291,11 +246,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "SUBJECT=#{subject}"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "Schema-sync job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -335,11 +286,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "PORT=#{port}"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "GTD PARA export job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -384,11 +331,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "PORT=#{port}"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "PARA daily-changed job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -445,11 +388,7 @@ defmodule BotArmyJobScheduler.Scheduler do
         args ++ ["INVOKE=0"]
       end
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "Daily learning podcast job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -490,11 +429,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "TIMEOUT_SECONDS=#{div(timeout_ms, 1000)}"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "PARA inbox media ingest job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -533,11 +468,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "PORT=#{port}"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "Synapse scorecard + PARA job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -576,11 +507,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       "PORT=#{port}"
     ]
 
-    case System.cmd("make", args,
-           cd: elixir_bots_dir,
-           stderr_to_stdout: true,
-           timeout: timeout_ms
-         ) do
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
       {output, 0} ->
         Logger.info(
           "Human ops digest job completed for schedule #{schedule_id}: #{String.trim(output)}"
@@ -632,6 +559,28 @@ defmodule BotArmyJobScheduler.Scheduler do
       {:error, reason} ->
         Logger.error("Skill job #{schedule_id} NATS request failed: #{inspect(reason)}")
         {:error, {:nats_request_failed, reason}}
+    end
+  end
+
+  defp make_cmd(args, opts, timeout_ms) when is_list(args) and is_list(opts) do
+    # System.cmd/3 has no :timeout option (raises ArgumentError). Run the make
+    # target in an unlinked process and bound it with a timed receive + kill.
+    parent = self()
+    ref = make_ref()
+
+    pid =
+      spawn(fn ->
+        send(parent, {ref, System.cmd("make", args, opts)})
+      end)
+
+    receive do
+      {^ref, result} ->
+        result
+    after
+      timeout_ms ->
+        Process.exit(pid, :kill)
+        Logger.error("[make_cmd] timed out after #{timeout_ms}ms (args=#{inspect(args)})")
+        {"", :timeout}
     end
   end
 

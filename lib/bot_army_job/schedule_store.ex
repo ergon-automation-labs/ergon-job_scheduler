@@ -34,7 +34,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
-  @memory_gardener_command "ops.memory_gardener.run"
+  @memory_gardener_command "bot.army.skills.memory_gardener.run"
 
   # API
 
@@ -1019,6 +1019,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
   defp ensure_memory_gardener_schedule(state) do
     if memory_gardener_enabled?() do
+      state = migrate_memory_gardener_command(state)
+
       has_schedule? =
         state
         |> Map.values()
@@ -1034,6 +1036,48 @@ defmodule BotArmyJobScheduler.ScheduleStore do
       end
     else
       state
+    end
+  end
+
+  @old_memory_gardener_command "ops.memory_gardener.run"
+
+  defp migrate_memory_gardener_command(state) do
+    case Enum.find(Map.values(state), fn s ->
+           s["command"] == @old_memory_gardener_command and s["status"] in ["active", "paused"]
+         end) do
+      nil ->
+        state
+
+      schedule ->
+        schedule_id = schedule["id"]
+
+        case BotArmyJobScheduler.Repo.get(BotArmyJobScheduler.Schemas.Schedule, schedule_id) do
+          nil ->
+            state
+
+          db_schedule ->
+            changeset =
+              BotArmyJobScheduler.Schemas.Schedule.changeset(db_schedule, %{
+                "command" => @memory_gardener_command
+              })
+
+            case BotArmyJobScheduler.Repo.update(changeset) do
+              {:ok, updated} ->
+                Logger.info(
+                  "Migrated memory gardener schedule #{schedule_id}: " <>
+                    "#{@old_memory_gardener_command} -> #{@memory_gardener_command}"
+                )
+
+                Map.put(state, schedule_id, schema_to_map(updated))
+
+              {:error, reason} ->
+                Logger.warning(
+                  "Failed to migrate memory gardener schedule #{schedule_id}: #{inspect(reason)}"
+                )
+
+                state
+            end
+        end
     end
   end
 
@@ -1076,7 +1120,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         %{
           "title" => "Memory Gardener Nightly Run",
           "description" =>
-            "Runs make memory-gardener-run — LLM-scored archive of completed-work memories to PARA with tombstones",
+            "Nightly memory gardener — requests bot.army.skills.memory_gardener.run on the skills bot, which LLM-scores completed-work memories and archives them to PARA with tombstones",
           "cron_expression" => env_string("JOB_SCHEDULER_MEMORY_GARDENER_CRON", "17 3 * * *"),
           "command" => @memory_gardener_command,
           "timeout" => env_int("JOB_SCHEDULER_MEMORY_GARDENER_TIMEOUT", 300),
