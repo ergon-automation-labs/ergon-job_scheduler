@@ -1016,7 +1016,7 @@ defmodule BotArmyJobScheduler.Scheduler do
     # Determine alert level
     alert_level =
       cond do
-        bots_dead > 0 or restart_count >= 3 or length(errors) > 0 -> "yellow"
+        bots_dead > 0 or restart_count >= 3 or errors != [] -> "yellow"
         db["responsive"] == false -> "red"
         true -> "green"
       end
@@ -1066,7 +1066,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       end
 
     issues =
-      if length(errors) > 0 do
+      if errors != [] do
         error_summary =
           errors
           |> Enum.map(&"#{&1["type"]}")
@@ -1079,7 +1079,7 @@ defmodule BotArmyJobScheduler.Scheduler do
       end
 
     recent_errors_summary =
-      if length(errors) > 0 do
+      if errors != [] do
         dlq_count = Enum.count(errors, &(&1["type"] == "dlq_item"))
         crash_count = Enum.count(errors, &(&1["type"] == "crash_log"))
 
