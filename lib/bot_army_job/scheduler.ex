@@ -1121,7 +1121,7 @@ defmodule BotArmyJobScheduler.Scheduler do
 
     with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(digest) do
-      case Gnat.kv_put(conn, "away_mode_digest", key, json) do
+      case Gnat.Jetstream.API.KV.put_value(conn, "away_mode_digest", key, json) do
         :ok ->
           Logger.info("Stored away-mode digest in KV: #{key}")
           :ok
@@ -1141,9 +1141,12 @@ defmodule BotArmyJobScheduler.Scheduler do
   def fetch_away_mode_digest_for_date(date_str) do
     key = "away_digest:#{date_str}"
 
-    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000),
-         {:ok, value} <- Gnat.kv_get(conn, "away_mode_digest", key) do
-      Jason.decode(value)
+    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000) do
+      case Gnat.Jetstream.API.KV.get_value(conn, "away_mode_digest", key) do
+        {:error, reason} -> {:error, reason}
+        nil -> {:error, :not_found}
+        value when is_binary(value) -> Jason.decode(value)
+      end
     else
       {:error, reason} -> {:error, reason}
     end
