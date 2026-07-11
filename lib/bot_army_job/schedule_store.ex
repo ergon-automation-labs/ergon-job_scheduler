@@ -35,6 +35,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
   @memory_gardener_command "bot.army.skills.memory_gardener.run"
+  @health_checker_command "ops.health_checker.run"
+  @away_mode_sieve_command "ops.away_mode_sieve.run"
 
   # API
 
