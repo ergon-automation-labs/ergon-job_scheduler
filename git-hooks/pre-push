@@ -26,7 +26,7 @@ if [[ $push_to_main -eq 1 ]]; then
   echo ""
 
   echo "📦 Ensuring Hex + dependencies..."
-  "$MIX_BIN" local.hex --force || {
+  "$MIX_BIN" local.hex --force --force || {
     echo "❌ mix local.hex failed - push aborted"
     exit 1
   }
