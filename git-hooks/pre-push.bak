@@ -1,0 +1,60 @@
+#!/bin/bash
+# Lightweight git pre-push hook for Bot Army bots
+# Keep push fast/reliable: run quick local validation only.
+
+set -e
+
+MIX_BIN="/Users/abby/.local/share/mise/shims/mix"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export HEX_HOME="$REPO_ROOT/.cache/hex"
+export MIX_HOME="$REPO_ROOT/.cache/mix"
+mkdir -p "$HEX_HOME" "$MIX_HOME"
+
+echo "🔍 Running pre-push checks..."
+echo ""
+
+push_to_main=0
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [[ $remote_ref == "refs/heads/main" ]]; then
+    push_to_main=1
+  fi
+done
+
+if [[ $push_to_main -eq 1 ]]; then
+  echo "⚠️  Pushing to main branch - running fast validation only..."
+  echo ""
+
+  echo "📦 Ensuring Hex + dependencies..."
+  "$MIX_BIN" local.hex --force --force || {
+    echo "❌ mix local.hex failed - push aborted"
+    exit 1
+  }
+  "$MIX_BIN" deps.get --force || {
+    echo "❌ mix deps.get failed - push aborted"
+    exit 1
+  }
+  echo ""
+
+  echo "🔨 Compiling code..."
+  "$MIX_BIN" compile --force || {
+    echo "❌ Compilation failed - push aborted"
+    exit 1
+  }
+
+  echo ""
+  echo "🧪 Running tests..."
+  "$MIX_BIN" test || {
+    echo "❌ Tests failed - push aborted"
+    exit 1
+  }
+
+  echo ""
+  echo "✅ Pre-push checks passed"
+  echo "ℹ️  Publish releases explicitly with: make push-and-publish"
+else
+  echo "ℹ️  Pushing to feature branch - skipping pre-push validation"
+fi
+
+echo ""
+exit 0

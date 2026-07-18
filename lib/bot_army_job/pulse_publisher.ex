@@ -41,17 +41,17 @@ defmodule BotArmyJobScheduler.PulsePublisher do
       metrics: %{}
     }
 
-    _ = BotArmyRuntime.NATS.Publisher.publish("bot.#{@service_name}.pulse", pulse)
+    _ = BotArmyLibraryRuntime.NATS.Publisher.publish("bot.#{@service_name}.pulse", pulse)
     :ok
   end
 
   defp publish_system_health(%{started_at: started_at}) do
-    tenant_id = System.get_env("BOT_ARMY_TENANT_ID") || BotArmyRuntime.Tenant.default_tenant_id()
+    tenant_id = System.get_env("BOT_ARMY_TENANT_ID") || BotArmyLibraryRuntime.Tenant.default_tenant_id()
 
     uptime_seconds =
       DateTime.diff(DateTime.utc_now() |> DateTime.truncate(:second), started_at, :second)
 
-    case BotArmyRuntime.SynapseHealth.publish(
+    case BotArmyLibraryRuntime.SynapseHealth.publish(
            source: @envelope_source,
            service: @service_name,
            tenant_id: tenant_id,

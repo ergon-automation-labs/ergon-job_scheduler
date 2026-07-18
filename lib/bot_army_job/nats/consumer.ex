@@ -5,7 +5,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   Subscribes to NATS subjects matching Job message patterns:
   - `job.schedule.*` - Job scheduling events
 
-  Messages are decoded using BotArmyCore.NATS.Decoder and routed to
+  Messages are decoded using BotArmyLibraryCore.NATS.Decoder and routed to
   appropriate handlers based on the event type.
 
   ## Features
@@ -60,9 +60,9 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
   @impl true
   def handle_continue(:connect, state) do
-    case GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5000) do
+    case GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5000) do
       {:ok, conn} ->
-        BotArmyRuntime.NATS.Connection.subscribe_to_status()
+        BotArmyLibraryRuntime.NATS.Connection.subscribe_to_status()
 
         subjects = [
           "job.schedule.create",
@@ -83,7 +83,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
           end)
 
         if length(subs) == length(subjects) do
-          BotArmyRuntime.Registry.register("job_scheduler", @subjects, @version)
+          BotArmyLibraryRuntime.Registry.register("job_scheduler", @subjects, @version)
           Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
           {:noreply, %{state | subscriptions: subs}}
         else
@@ -101,10 +101,10 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
   @impl true
   def handle_info({:msg, msg}, state) do
-    BotArmyRuntime.Tracing.with_consumer_span(msg.topic, Map.get(msg, :headers, []), fn ->
+    BotArmyLibraryRuntime.Tracing.with_consumer_span(msg.topic, Map.get(msg, :headers, []), fn ->
       Logger.debug("Received NATS message on subject: #{msg.topic}")
 
-      case BotArmyCore.NATS.Decoder.decode(msg.body) do
+      case BotArmyLibraryCore.NATS.Decoder.decode(msg.body) do
         {:ok, decoded_message} ->
           route_message(decoded_message)
 
@@ -138,7 +138,7 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   @impl true
   def handle_info(:registry_heartbeat, state) do
     if state.subscriptions != [] do
-      BotArmyRuntime.Registry.register("job_scheduler", @subjects, @version)
+      BotArmyLibraryRuntime.Registry.register("job_scheduler", @subjects, @version)
       Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
     end
 

@@ -948,7 +948,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp safe_nats_publish(subject, payload) do
-    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000),
+    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(payload) do
       case Gnat.pub(conn, subject, json) do
         :ok -> :ok
@@ -1119,7 +1119,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   defp store_digest_in_kv(digest) do
     key = "away_digest:#{digest["date"]}"
 
-    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000),
+    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(digest) do
       case Gnat.Jetstream.API.KV.put_value(conn, "away_mode_digest", key, json) do
         :ok ->
@@ -1141,7 +1141,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   def fetch_away_mode_digest_for_date(date_str) do
     key = "away_digest:#{date_str}"
 
-    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000) do
+    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000) do
       case Gnat.Jetstream.API.KV.get_value(conn, "away_mode_digest", key) do
         {:error, reason} -> {:error, reason}
         nil -> {:error, :not_found}
@@ -1177,7 +1177,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp safe_nats_request(subject, payload, timeout_ms) do
-    with {:ok, conn} <- GenServer.call(BotArmyRuntime.NATS.Connection, :get_connection, 5_000),
+    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(payload),
          {:ok, response} <- Gnat.request(conn, subject, json, receive_timeout: timeout_ms) do
       case Jason.decode(response.body) do
@@ -1210,7 +1210,7 @@ defmodule BotArmyJobScheduler.Scheduler do
     # Publish to NATS - use the command to determine the subject
     subject = schedule_command_to_subject(schedule_value(schedule, "command", :command))
 
-    case BotArmyRuntime.NATS.Publisher.publish(subject, message) do
+    case BotArmyLibraryRuntime.NATS.Publisher.publish(subject, message) do
       {:ok, _subject} -> :ok
       {:error, reason} -> {:error, reason}
     end

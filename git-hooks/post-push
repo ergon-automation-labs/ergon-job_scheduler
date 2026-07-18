@@ -1,0 +1,5 @@
+#!/bin/bash
+# Post-push hook: automatically publish release after successful push
+# Runs make publish-release to create GitHub release and trigger deployment pipeline
+
+make publish-release
