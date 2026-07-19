@@ -24,3 +24,4 @@ mix.lock
 *.tar.gz
 *.tar.xz
 _build_cursor_test/
+.push-validated
