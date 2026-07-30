@@ -34,7 +34,12 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   @subjects [
     %{subject: "job.schedule.create", type: :subscribe, description: "Create scheduled job"},
     %{subject: "job.schedule.update", type: :subscribe, description: "Update scheduled job"},
-    %{subject: "ops.*.run", type: :subscribe, description: "Ops task runner"}
+    %{subject: "ops.*.run", type: :subscribe, description: "Ops task runner"},
+    %{
+      subject: "companion.heartbeat",
+      type: :subscribe,
+      description: "Companion heartbeat trigger"
+    }
   ]
 
   # API
@@ -68,7 +73,8 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
         subjects = [
           "job.schedule.create",
           "job.schedule.update",
-          "ops.*.run"
+          "ops.*.run",
+          "companion.heartbeat"
         ]
 
         subs =
@@ -161,6 +167,9 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
       "job.schedule.update" ->
         BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(message)
+
+      "companion.heartbeat" ->
+        BotArmyJobScheduler.Handlers.CompanionHandler.handle_heartbeat(message)
 
       _ ->
         if is_binary(event) and String.starts_with?(event, "ops.") and
