@@ -31,7 +31,8 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   @version Mix.Project.config()[:version]
   @registry_heartbeat_ms 20_000
 
-  @subjects [
+  # Base subjects (will be prefixed with node_id)
+  @base_subjects [
     %{subject: "job.schedule.create", type: :subscribe, description: "Create scheduled job"},
     %{subject: "job.schedule.update", type: :subscribe, description: "Update scheduled job"},
     %{subject: "ops.*.run", type: :subscribe, description: "Ops task runner"},
@@ -54,13 +55,19 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   def init(opts) do
     Logger.info("Starting Job NATS consumer")
 
+    node_id = get_node_id()
+
     state = %{
       subscriptions: [],
       reconnect_attempt: 0,
-      opts: opts
+      opts: opts,
+      node_id: node_id
     }
 
-    Logger.info("Job NATS consumer initialized, ready to receive messages from NATS broker")
+    Logger.info(
+      "Job NATS consumer initialized on node: #{node_id}, ready to receive messages from NATS broker"
+    )
+
     {:ok, state, {:continue, :connect}}
   end
 
@@ -70,12 +77,17 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
       {:ok, conn} ->
         BotArmyLibraryRuntime.NATS.Connection.subscribe_to_status()
 
-        subjects = [
+        # Build node-prefixed subjects
+        node_id = state.node_id
+
+        base_subjects = [
           "job.schedule.create",
           "job.schedule.update",
           "ops.*.run",
           "companion.heartbeat"
         ]
+
+        subjects = Enum.map(base_subjects, &"#{node_id}.#{&1}")
 
         subs =
           Enum.reduce_while(subjects, [], fn subject, acc ->
@@ -91,7 +103,13 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
           end)
 
         if length(subs) == length(subjects) do
-          BotArmyLibraryRuntime.Registry.register("job_scheduler", @subjects, @version)
+          # Build subjects for registry with node prefix
+          registry_subjects =
+            Enum.map(@base_subjects, fn s ->
+              %{s | subject: "#{node_id}.#{s.subject}"}
+            end)
+
+          BotArmyLibraryRuntime.Registry.register("job_scheduler", registry_subjects, @version)
           Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
           {:noreply, %{state | subscriptions: subs}}
         else
@@ -146,7 +164,14 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
   @impl true
   def handle_info(:registry_heartbeat, state) do
     if state.subscriptions != [] do
-      BotArmyLibraryRuntime.Registry.register("job_scheduler", @subjects, @version)
+      node_id = state.node_id
+
+      registry_subjects =
+        Enum.map(@base_subjects, fn s ->
+          %{s | subject: "#{node_id}.#{s.subject}"}
+        end)
+
+      BotArmyLibraryRuntime.Registry.register("job_scheduler", registry_subjects, @version)
       Process.send_after(self(), :registry_heartbeat, @registry_heartbeat_ms)
     end
 
@@ -179,5 +204,12 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
           Logger.debug("Unknown Job event type: #{event}")
         end
     end
+  end
+
+  defp get_node_id do
+    System.get_env("NODE_ID") ||
+      System.get_env("HOSTNAME") ||
+      node() |> Atom.to_string() |> String.split("@") |> List.first() ||
+      "unknown"
   end
 end
