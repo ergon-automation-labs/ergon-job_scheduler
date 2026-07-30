@@ -33,7 +33,8 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
   @subjects [
     %{subject: "job.schedule.create", type: :subscribe, description: "Create scheduled job"},
-    %{subject: "job.schedule.update", type: :subscribe, description: "Update scheduled job"}
+    %{subject: "job.schedule.update", type: :subscribe, description: "Update scheduled job"},
+    %{subject: "ops.*.run", type: :subscribe, description: "Ops task runner"}
   ]
 
   # API
@@ -66,7 +67,8 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
 
         subjects = [
           "job.schedule.create",
-          "job.schedule.update"
+          "job.schedule.update",
+          "ops.*.run"
         ]
 
         subs =
@@ -154,9 +156,19 @@ defmodule BotArmyJobScheduler.NATS.Consumer do
     event = message["event"]
 
     case event do
-      "job.schedule.create" -> BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
-      "job.schedule.update" -> BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(message)
-      _ -> Logger.debug("Unknown Job event type: #{event}")
+      "job.schedule.create" ->
+        BotArmyJobScheduler.Handlers.ScheduleHandler.handle_create(message)
+
+      "job.schedule.update" ->
+        BotArmyJobScheduler.Handlers.ScheduleHandler.handle_update(message)
+
+      _ ->
+        if is_binary(event) and String.starts_with?(event, "ops.") and
+             String.ends_with?(event, ".run") do
+          BotArmyJobScheduler.Handlers.OpsHandler.handle_run(message)
+        else
+          Logger.debug("Unknown Job event type: #{event}")
+        end
     end
   end
 end
