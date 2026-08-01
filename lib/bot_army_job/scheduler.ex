@@ -23,6 +23,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   @human_ops_digest_command "ops.human_ops_digest.run"
   @desk_operator_snapshot_command "bot.army.skills.desk_operator_snapshot.generate"
   @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
+  @companion_heartbeat_command "companion.heartbeat"
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
   @health_checker_command "ops.health_checker.run"
@@ -143,6 +144,9 @@ defmodule BotArmyJobScheduler.Scheduler do
         run_skill_job(schedule)
 
       @bridge_health_snapshot_command ->
+        run_skill_job(schedule)
+
+      @companion_heartbeat_command ->
         run_skill_job(schedule)
 
       @bridge_chronicle_daily_brief_command ->
@@ -948,7 +952,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp safe_nats_publish(subject, payload) do
-    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
+    with {:ok, conn} <-
+           GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(payload) do
       case Gnat.pub(conn, subject, json) do
         :ok -> :ok
@@ -1119,7 +1124,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   defp store_digest_in_kv(digest) do
     key = "away_digest:#{digest["date"]}"
 
-    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
+    with {:ok, conn} <-
+           GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(digest) do
       case Gnat.Jetstream.API.KV.put_value(conn, "away_mode_digest", key, json) do
         :ok ->
@@ -1141,7 +1147,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   def fetch_away_mode_digest_for_date(date_str) do
     key = "away_digest:#{date_str}"
 
-    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000) do
+    with {:ok, conn} <-
+           GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000) do
       case Gnat.Jetstream.API.KV.get_value(conn, "away_mode_digest", key) do
         {:error, reason} -> {:error, reason}
         nil -> {:error, :not_found}
@@ -1177,7 +1184,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp safe_nats_request(subject, payload, timeout_ms) do
-    with {:ok, conn} <- GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
+    with {:ok, conn} <-
+           GenServer.call(BotArmyLibraryRuntime.NATS.Connection, :get_connection, 5_000),
          {:ok, json} <- Jason.encode(payload),
          {:ok, response} <- Gnat.request(conn, subject, json, receive_timeout: timeout_ms) do
       case Jason.decode(response.body) do
