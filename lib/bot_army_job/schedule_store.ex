@@ -38,6 +38,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @memory_gardener_command "bot.army.skills.memory_gardener.run"
   @health_checker_command "ops.health_checker.run"
   @away_mode_sieve_command "ops.away_mode_sieve.run"
+  @wrong_turns_autoclassify_command "ops.wrong_turns_autoclassify.run"
 
   # API
 
@@ -201,7 +202,8 @@ defmodule BotArmyJobScheduler.ScheduleStore do
        |> ensure_companion_heartbeat_schedule()
        |> ensure_bridge_chronicle_daily_brief_schedule()
        |> ensure_fitness_plan_generate_schedule()
-       |> ensure_memory_gardener_schedule()}
+       |> ensure_memory_gardener_schedule()
+       |> ensure_wrong_turns_autoclassify_schedule()}
     rescue
       e -> {:error, Exception.message(e)}
     end
@@ -1099,6 +1101,64 @@ defmodule BotArmyJobScheduler.ScheduleStore do
       end
     else
       state
+    end
+  end
+
+  defp ensure_wrong_turns_autoclassify_schedule(state) do
+    if wrong_turns_autoclassify_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @wrong_turns_autoclassify_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_wrong_turns_autoclassify_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp wrong_turns_autoclassify_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_WRONG_TURNS_AUTOCLASSIFY", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_wrong_turns_autoclassify_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Wrong-Turns Autoclassify",
+          "description" =>
+            "Runs make wrong-turns-autoclassify APPLY=1 (LLM classifies unclassified wrong-turn candidates; confident proposals commit, low-confidence left for human)",
+          "cron_expression" =>
+            System.get_env("JOB_SCHEDULER_WRONG_TURNS_AUTOCLASSIFY_CRON", "0 9 * * 0"),
+          "command" => @wrong_turns_autoclassify_command,
+          "timeout" =>
+            String.to_integer(
+              System.get_env("JOB_SCHEDULER_WRONG_TURNS_AUTOCLASSIFY_TIMEOUT", "3600")
+            ),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Wrong-turns autoclassify schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Wrong-turns autoclassify schedule: #{inspect(reason)}")
+        state
     end
   end
 

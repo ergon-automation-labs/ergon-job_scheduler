@@ -28,6 +28,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
   @health_checker_command "ops.health_checker.run"
   @away_mode_sieve_command "ops.away_mode_sieve.run"
+  @wrong_turns_autoclassify_command "ops.wrong_turns_autoclassify.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -161,6 +162,9 @@ defmodule BotArmyJobScheduler.Scheduler do
       @away_mode_sieve_command ->
         run_away_mode_sieve_job(schedule)
 
+      @wrong_turns_autoclassify_command ->
+        run_wrong_turns_autoclassify_job(schedule)
+
       command ->
         if String.starts_with?(command, "bot.army.skills.") do
           run_skill_job(schedule)
@@ -241,6 +245,43 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
 
       {:error, {:fitness_plan_generate_exception, error}}
+  end
+
+  defp run_wrong_turns_autoclassify_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 3600, 1) * 1000
+
+    # APPLY=1 drains the unclassified queue: confident LLM proposals (≥0.6)
+    # commit through resolve_candidate; low-confidence ones stay unclassified
+    # for human review. No LIMIT — classify the whole backlog each run.
+    args = ["wrong-turns-autoclassify", "APPLY=1"]
+
+    case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
+      {output, 0} ->
+        Logger.info(
+          "Wrong-turns autoclassify job completed for schedule #{schedule_id}: #{String.trim(output)}"
+        )
+
+        :ok
+
+      {output, exit_code} ->
+        Logger.error(
+          "Wrong-turns autoclassify job failed for schedule #{schedule_id} " <>
+            "(exit=#{exit_code}, dir=#{elixir_bots_dir}): #{String.trim(output)}"
+        )
+
+        {:error, {:wrong_turns_autoclassify_failed, exit_code}}
+    end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Wrong-turns autoclassify job raised for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:wrong_turns_autoclassify_exception, error}}
   end
 
   defp run_schema_sync_job(schedule) do
