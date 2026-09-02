@@ -39,6 +39,11 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @health_checker_command "ops.health_checker.run"
   @away_mode_sieve_command "ops.away_mode_sieve.run"
   @wrong_turns_autoclassify_command "ops.wrong_turns_autoclassify.run"
+  @graphify_refresh_full_command "ops.graphify_refresh_full.run"
+  @graphify_refresh_bots_command "ops.graphify_refresh_bots.run"
+  @graphify_refresh_personal_os_command "ops.graphify_refresh_personal_os.run"
+  @graphify_refresh_surfaces_command "ops.graphify_refresh_surfaces.run"
+  @graphify_refresh_schemas_command "ops.graphify_refresh_schemas.run"
 
   # API
 
@@ -203,7 +208,12 @@ defmodule BotArmyJobScheduler.ScheduleStore do
        |> ensure_bridge_chronicle_daily_brief_schedule()
        |> ensure_fitness_plan_generate_schedule()
        |> ensure_memory_gardener_schedule()
-       |> ensure_wrong_turns_autoclassify_schedule()}
+       |> ensure_wrong_turns_autoclassify_schedule()
+       |> ensure_graphify_refresh_full_schedule()
+       |> ensure_graphify_refresh_bots_schedule()
+       |> ensure_graphify_refresh_personal_os_schedule()
+       |> ensure_graphify_refresh_surfaces_schedule()
+       |> ensure_graphify_refresh_schemas_schedule()}
     rescue
       e -> {:error, Exception.message(e)}
     end
@@ -1279,5 +1289,284 @@ defmodule BotArmyJobScheduler.ScheduleStore do
       "created_at" => schedule.inserted_at |> NaiveDateTime.to_iso8601(),
       "updated_at" => schedule.updated_at |> NaiveDateTime.to_iso8601()
     }
+  end
+
+  # Graphify Refresh - Full System (4am daily, 75 min timeout)
+  defp ensure_graphify_refresh_full_schedule(state) do
+    if graphify_refresh_full_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @graphify_refresh_full_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_graphify_refresh_full_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp graphify_refresh_full_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_GRAPHIFY_REFRESH_FULL", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_graphify_refresh_full_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Graphify Full System Refresh",
+          "description" =>
+            "Daily full knowledge graph refresh of the entire system (monorepo + linked subdirectories)",
+          "cron_expression" =>
+            env_string("JOB_SCHEDULER_GRAPHIFY_REFRESH_FULL_CRON", "0 4 * * *"),
+          "command" => @graphify_refresh_full_command,
+          "timeout" => env_int("JOB_SCHEDULER_GRAPHIFY_REFRESH_FULL_TIMEOUT", 4500),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Graphify full refresh schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Graphify full refresh schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  # Graphify Refresh - Bots (5pm daily, 10 min timeout)
+  defp ensure_graphify_refresh_bots_schedule(state) do
+    if graphify_refresh_bots_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @graphify_refresh_bots_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_graphify_refresh_bots_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp graphify_refresh_bots_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_GRAPHIFY_REFRESH_BOTS", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_graphify_refresh_bots_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Graphify Bots Subdirectory Refresh",
+          "description" => "Hourly incremental knowledge graph refresh for the bots subdirectory",
+          "cron_expression" =>
+            env_string("JOB_SCHEDULER_GRAPHIFY_REFRESH_BOTS_CRON", "0 17 * * *"),
+          "command" => @graphify_refresh_bots_command,
+          "timeout" => env_int("JOB_SCHEDULER_GRAPHIFY_REFRESH_BOTS_TIMEOUT", 600),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Graphify bots refresh schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Graphify bots refresh schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  # Graphify Refresh - Personal OS (6pm daily, 10 min timeout)
+  defp ensure_graphify_refresh_personal_os_schedule(state) do
+    if graphify_refresh_personal_os_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @graphify_refresh_personal_os_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_graphify_refresh_personal_os_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp graphify_refresh_personal_os_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_GRAPHIFY_REFRESH_PERSONAL_OS", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_graphify_refresh_personal_os_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Graphify Personal OS Refresh",
+          "description" =>
+            "Hourly incremental knowledge graph refresh for the personal_os subdirectory",
+          "cron_expression" =>
+            env_string("JOB_SCHEDULER_GRAPHIFY_REFRESH_PERSONAL_OS_CRON", "0 18 * * *"),
+          "command" => @graphify_refresh_personal_os_command,
+          "timeout" => env_int("JOB_SCHEDULER_GRAPHIFY_REFRESH_PERSONAL_OS_TIMEOUT", 600),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Graphify personal_os refresh schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Graphify personal_os refresh schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  # Graphify Refresh - Surfaces (7pm daily, 10 min timeout)
+  defp ensure_graphify_refresh_surfaces_schedule(state) do
+    if graphify_refresh_surfaces_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @graphify_refresh_surfaces_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_graphify_refresh_surfaces_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp graphify_refresh_surfaces_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_GRAPHIFY_REFRESH_SURFACES", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_graphify_refresh_surfaces_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Graphify Surfaces Refresh",
+          "description" =>
+            "Hourly incremental knowledge graph refresh for the surfaces subdirectory",
+          "cron_expression" =>
+            env_string("JOB_SCHEDULER_GRAPHIFY_REFRESH_SURFACES_CRON", "0 19 * * *"),
+          "command" => @graphify_refresh_surfaces_command,
+          "timeout" => env_int("JOB_SCHEDULER_GRAPHIFY_REFRESH_SURFACES_TIMEOUT", 600),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Graphify surfaces refresh schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Graphify surfaces refresh schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  # Graphify Refresh - Schemas (8pm daily, 10 min timeout)
+  defp ensure_graphify_refresh_schemas_schedule(state) do
+    if graphify_refresh_schemas_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @graphify_refresh_schemas_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_graphify_refresh_schemas_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp graphify_refresh_schemas_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_GRAPHIFY_REFRESH_SCHEMAS", "false")
+    |> String.downcase()
+    |> Kernel.in(["1", "true", "yes"])
+  end
+
+  defp create_graphify_refresh_schemas_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Graphify Schemas Refresh",
+          "description" =>
+            "Hourly incremental knowledge graph refresh for the schemas subdirectory",
+          "cron_expression" =>
+            env_string("JOB_SCHEDULER_GRAPHIFY_REFRESH_SCHEMAS_CRON", "0 20 * * *"),
+          "command" => @graphify_refresh_schemas_command,
+          "timeout" => env_int("JOB_SCHEDULER_GRAPHIFY_REFRESH_SCHEMAS_TIMEOUT", 600),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default Graphify schemas refresh schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed Graphify schemas refresh schedule: #{inspect(reason)}")
+        state
+    end
   end
 end

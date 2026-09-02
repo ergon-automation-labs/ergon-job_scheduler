@@ -29,6 +29,11 @@ defmodule BotArmyJobScheduler.Scheduler do
   @health_checker_command "ops.health_checker.run"
   @away_mode_sieve_command "ops.away_mode_sieve.run"
   @wrong_turns_autoclassify_command "ops.wrong_turns_autoclassify.run"
+  @graphify_refresh_full_command "ops.graphify_refresh_full.run"
+  @graphify_refresh_bots_command "ops.graphify_refresh_bots.run"
+  @graphify_refresh_personal_os_command "ops.graphify_refresh_personal_os.run"
+  @graphify_refresh_surfaces_command "ops.graphify_refresh_surfaces.run"
+  @graphify_refresh_schemas_command "ops.graphify_refresh_schemas.run"
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: @server)
@@ -164,6 +169,21 @@ defmodule BotArmyJobScheduler.Scheduler do
 
       @wrong_turns_autoclassify_command ->
         run_wrong_turns_autoclassify_job(schedule)
+
+      @graphify_refresh_full_command ->
+        run_graphify_refresh_full_job(schedule)
+
+      @graphify_refresh_bots_command ->
+        run_graphify_refresh_bots_job(schedule)
+
+      @graphify_refresh_personal_os_command ->
+        run_graphify_refresh_personal_os_job(schedule)
+
+      @graphify_refresh_surfaces_command ->
+        run_graphify_refresh_surfaces_job(schedule)
+
+      @graphify_refresh_schemas_command ->
+        run_graphify_refresh_schemas_job(schedule)
 
       command ->
         if String.starts_with?(command, "bot.army.skills.") do
@@ -1272,6 +1292,109 @@ defmodule BotArmyJobScheduler.Scheduler do
       other -> "job.schedule.execute:#{other}"
     end
   end
+
+  defp run_graphify_refresh_full_job(schedule) do
+    BotArmyJobScheduler.TelemetryHelper.execute_with_telemetry(
+      schedule,
+      "graphify_refresh_full",
+      fn ->
+        schedule_id = schedule_value(schedule, "id", :id)
+        elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+        timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 4500, 1) * 1000
+
+        # Full system graphify refresh (covers all linked repos)
+        args = ["graphify-refresh"]
+
+        case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
+          {_output, 0} ->
+            :ok
+
+          {output, exit_code} ->
+            {:error, {:graphify_refresh_full_failed, exit_code, String.trim(output)}}
+        end
+      end
+    )
+    |> handle_telemetry_result()
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Graphify full refresh crashed for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:graphify_refresh_full_crashed, error}}
+  end
+
+  defp run_graphify_refresh_bots_job(schedule) do
+    run_graphify_refresh_with_repo(
+      schedule,
+      "/Users/abby/code/bots",
+      "bots"
+    )
+  end
+
+  defp run_graphify_refresh_personal_os_job(schedule) do
+    run_graphify_refresh_with_repo(
+      schedule,
+      "/Users/abby/Documents/personal_os",
+      "personal_os"
+    )
+  end
+
+  defp run_graphify_refresh_surfaces_job(schedule) do
+    run_graphify_refresh_with_repo(
+      schedule,
+      "/Users/abby/code/surfaces",
+      "surfaces"
+    )
+  end
+
+  defp run_graphify_refresh_schemas_job(schedule) do
+    run_graphify_refresh_with_repo(
+      schedule,
+      "/Users/abby/code/schemas",
+      "schemas"
+    )
+  end
+
+  defp run_graphify_refresh_with_repo(schedule, repo_path, repo_name) do
+    job_name = "graphify_refresh_#{repo_name}"
+
+    BotArmyJobScheduler.TelemetryHelper.execute_with_telemetry(
+      schedule,
+      job_name,
+      fn ->
+        schedule_id = schedule_value(schedule, "id", :id)
+        elixir_bots_dir = System.get_env("ELIXIR_BOTS_DIR", "/Users/abby/code/elixir_bots")
+        timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 600, 1) * 1000
+
+        # Incremental repo-specific graphify refresh
+        args = ["graphify-refresh", "REPO=#{repo_path}"]
+
+        case make_cmd(args, [cd: elixir_bots_dir, stderr_to_stdout: true], timeout_ms) do
+          {_output, 0} ->
+            :ok
+
+          {output, exit_code} ->
+            {:error, {:graphify_refresh_failed, repo_name, exit_code, String.trim(output)}}
+        end
+      end
+    )
+    |> handle_telemetry_result()
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+
+      Logger.error(
+        "Graphify #{repo_name} refresh crashed for schedule #{rescue_schedule_id}: #{inspect(error)}"
+      )
+
+      {:error, {:graphify_refresh_crashed, repo_name, error}}
+  end
+
+  defp handle_telemetry_result({:ok, _elapsed_ms}), do: :ok
+  defp handle_telemetry_result({:error, _reason, _elapsed_ms}), do: :ok
 
   defp parse_last_run(nil, now), do: DateTime.add(now, -1_000_000, :second)
   defp parse_last_run(%DateTime{} = last_run, _now), do: last_run
