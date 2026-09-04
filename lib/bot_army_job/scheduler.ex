@@ -186,10 +186,21 @@ defmodule BotArmyJobScheduler.Scheduler do
         run_graphify_refresh_schemas_job(schedule)
 
       command ->
-        if String.starts_with?(command, "bot.army.skills.") do
-          run_skill_job(schedule)
-        else
-          publish_schedule_event(schedule)
+        cond do
+          String.starts_with?(command, "bot.army.skills.") ->
+            run_skill_job(schedule)
+
+          # Salt-seeded schedules (bots/job_schedules.sls) store full shell
+          # commands like "nats request --server nats://localhost:4222 <subject> '{}'".
+          # Parse the subject out so they fire a real NATS request instead of
+          # landing in publish_schedule_event's dead job.schedule.execute:* subject.
+          subject = parse_nats_request_subject(command) ->
+            run_skill_job(schedule, subject)
+
+          # Any other shell command (cd/make/python3 ...) executes for real,
+          # bounded by the schedule's timeout.
+          true ->
+            run_shell_job(schedule)
         end
     end
   end
@@ -608,8 +619,11 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp run_skill_job(schedule) do
+    run_skill_job(schedule, schedule_value(schedule, "command", :command))
+  end
+
+  defp run_skill_job(schedule, subject) do
     schedule_id = schedule_value(schedule, "id", :id)
-    subject = schedule_value(schedule, "command", :command)
     timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 30, 1) * 1000
 
     Logger.info("Running skill job #{schedule_id}: NATS request to #{subject}")
@@ -1264,6 +1278,58 @@ defmodule BotArmyJobScheduler.Scheduler do
     System.get_env(key, "false")
     |> String.downcase()
     |> Kernel.in(["1", "true", "yes"])
+  end
+
+  # "nats request --server nats://localhost:4222 <subject> '{}'" -> "<subject>"
+  defp parse_nats_request_subject(command) when is_binary(command) do
+    case Regex.run(~r/^nats request\s+(?:--server\s+\S+\s+)?([\w.\-:>*]+)/, command) do
+      [_, subject] -> subject
+      _ -> nil
+    end
+  end
+
+  defp parse_nats_request_subject(_), do: nil
+
+  # Salt-seeded schedules may carry raw shell commands (cd ... && make ...,
+  # python3 scripts). Execute them with a bounded child process, mirroring
+  # make_cmd/3 — System.cmd/3 has no :timeout option.
+  defp run_shell_job(schedule) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    command = schedule_value(schedule, "command", :command)
+    timeout_ms = max(schedule_value(schedule, "timeout", :timeout) || 30, 1) * 1000
+
+    Logger.info("Running shell job #{schedule_id}: #{command}")
+
+    parent = self()
+    ref = make_ref()
+
+    pid =
+      spawn(fn ->
+        send(parent, {ref, System.cmd("bash", ["-c", command], stderr_to_stdout: true)})
+      end)
+
+    receive do
+      {^ref, {output, 0}} ->
+        Logger.info(
+          "Shell job #{schedule_id} completed: #{String.slice(String.trim(output), 0, 300)}"
+        )
+
+        :ok
+
+      {^ref, {output, exit_code}} ->
+        Logger.error(
+          "Shell job #{schedule_id} exited #{exit_code}: #{String.slice(String.trim(output), 0, 500)}"
+        )
+
+        {:error, {:shell_exit, exit_code}}
+    after
+      timeout_ms ->
+        Process.exit(pid, :kill)
+
+        Logger.error("Shell job #{schedule_id} timed out after #{timeout_ms}ms")
+
+        {:error, {:shell_timeout, timeout_ms}}
+    end
   end
 
   defp publish_schedule_event(schedule) do
