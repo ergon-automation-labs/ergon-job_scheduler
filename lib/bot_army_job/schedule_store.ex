@@ -33,6 +33,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
   @desk_operator_snapshot_command "bot.army.skills.desk_operator_snapshot.generate"
   @bridge_health_snapshot_command "bot.army.skills.bridge_health_snapshot.generate"
   @companion_heartbeat_command "companion.heartbeat"
+  @companion_reflection_command "companion.reflection"
   @bridge_chronicle_daily_brief_command "ops.bridge_chronicle_daily_brief.run"
   @fitness_plan_generate_command "ops.fitness_plan_generate.run"
   @memory_gardener_command "bot.army.skills.memory_gardener.run"
@@ -205,6 +206,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
        |> ensure_desk_operator_snapshot_schedule()
        |> ensure_bridge_health_snapshot_schedule()
        |> ensure_companion_heartbeat_schedule()
+       |> ensure_companion_reflection_schedule()
        |> ensure_bridge_chronicle_daily_brief_schedule()
        |> ensure_fitness_plan_generate_schedule()
        |> ensure_memory_gardener_schedule()
@@ -971,6 +973,65 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
       {:error, reason} ->
         Logger.error("Failed to seed companion heartbeat schedule: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp ensure_companion_reflection_schedule(state) do
+    if companion_reflection_enabled?() do
+      has_schedule? =
+        state
+        |> Map.values()
+        |> Enum.any?(fn schedule ->
+          schedule["command"] == @companion_reflection_command and
+            schedule["status"] in ["active", "paused"]
+        end)
+
+      if has_schedule? do
+        state
+      else
+        create_companion_reflection_schedule(state)
+      end
+    else
+      state
+    end
+  end
+
+  defp companion_reflection_enabled? do
+    System.get_env("JOB_SCHEDULER_ENABLE_COMPANION_REFLECTION", "true")
+    |> String.downcase()
+    |> Kernel.!=("false")
+  end
+
+  defp create_companion_reflection_schedule(state) do
+    schedule_id = Ecto.UUID.generate()
+
+    changeset =
+      BotArmyJobScheduler.Schemas.Schedule.changeset(
+        %BotArmyJobScheduler.Schemas.Schedule{id: schedule_id},
+        %{
+          "title" => "Companion Reflection",
+          "description" =>
+            "Autonomous reflection on rotating angles: personal context, bot army health, outreach momentum, life balance. Observations written to PARA.",
+          "cron_expression" =>
+            System.get_env(
+              "JOB_SCHEDULER_COMPANION_REFLECTION_CRON",
+              "0 */6 * * *"
+            ),
+          "command" => @companion_reflection_command,
+          "timeout" =>
+            String.to_integer(System.get_env("JOB_SCHEDULER_COMPANION_REFLECTION_TIMEOUT", "300")),
+          "status" => "active"
+        }
+      )
+
+    case BotArmyJobScheduler.Repo.insert(changeset) do
+      {:ok, db_schedule} ->
+        Logger.info("Seeded default companion reflection schedule: #{schedule_id}")
+        Map.put(state, schedule_id, schema_to_map(db_schedule))
+
+      {:error, reason} ->
+        Logger.error("Failed to seed companion reflection schedule: #{inspect(reason)}")
         state
     end
   end

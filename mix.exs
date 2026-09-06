@@ -8,7 +8,11 @@ defmodule BotArmyJobScheduler.MixProject do
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      default_release: :job_scheduler_bot,
       releases: [
+        job_scheduler_bot: [
+          applications: [bot_army_job_scheduler: :permanent]
+        ],
         job_scheduler: [
           applications: [bot_army_job_scheduler: :permanent]
         ]
