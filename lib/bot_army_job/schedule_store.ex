@@ -194,28 +194,39 @@ defmodule BotArmyJobScheduler.ScheduleStore do
           Map.put(acc, schedule.id |> to_string(), schema_to_map(schedule))
         end)
 
-      {:ok,
-       loaded_state
-       |> ensure_schema_sync_schedule()
-       |> ensure_para_daily_changed_schedule()
-       |> ensure_gtd_para_export_schedule()
-       |> ensure_daily_learning_podcast_schedule()
-       |> ensure_para_inbox_media_ingest_schedule()
-       |> ensure_synapse_scorecard_signals_schedule()
-       |> ensure_human_ops_digest_schedule()
-       |> ensure_desk_operator_snapshot_schedule()
-       |> ensure_bridge_health_snapshot_schedule()
-       |> ensure_companion_heartbeat_schedule()
-       |> ensure_companion_reflection_schedule()
-       |> ensure_bridge_chronicle_daily_brief_schedule()
-       |> ensure_fitness_plan_generate_schedule()
-       |> ensure_memory_gardener_schedule()
-       |> ensure_wrong_turns_autoclassify_schedule()
-       |> ensure_graphify_refresh_full_schedule()
-       |> ensure_graphify_refresh_bots_schedule()
-       |> ensure_graphify_refresh_personal_os_schedule()
-       |> ensure_graphify_refresh_surfaces_schedule()
-       |> ensure_graphify_refresh_schemas_schedule()}
+      # P10 (2026-09-06, Docker fleet test): the ensure_* chain re-creates the
+      # operator's personal schedules (para-inbox-media-ingest etc., whose
+      # args embed real machine paths like /Users/...) in EVERY fresh
+      # database — where those jobs can only fail (missing dir → enoent,
+      # 15-minute timeouts, endless retries). Set JOB_SCHEDULER_DISABLE_SEEDS=1
+      # to skip the seed chain (existing schedules in the DB still load).
+      if System.get_env("JOB_SCHEDULER_DISABLE_SEEDS", "0") == "1" do
+        Logger.info("ScheduleStore: JOB_SCHEDULER_DISABLE_SEEDS=1 — skipping ensure_* seed chain")
+        {:ok, loaded_state}
+      else
+        {:ok,
+         loaded_state
+         |> ensure_schema_sync_schedule()
+         |> ensure_para_daily_changed_schedule()
+         |> ensure_gtd_para_export_schedule()
+         |> ensure_daily_learning_podcast_schedule()
+         |> ensure_para_inbox_media_ingest_schedule()
+         |> ensure_synapse_scorecard_signals_schedule()
+         |> ensure_human_ops_digest_schedule()
+         |> ensure_desk_operator_snapshot_schedule()
+         |> ensure_bridge_health_snapshot_schedule()
+         |> ensure_companion_heartbeat_schedule()
+         |> ensure_companion_reflection_schedule()
+         |> ensure_bridge_chronicle_daily_brief_schedule()
+         |> ensure_fitness_plan_generate_schedule()
+         |> ensure_memory_gardener_schedule()
+         |> ensure_wrong_turns_autoclassify_schedule()
+         |> ensure_graphify_refresh_full_schedule()
+         |> ensure_graphify_refresh_bots_schedule()
+         |> ensure_graphify_refresh_personal_os_schedule()
+         |> ensure_graphify_refresh_surfaces_schedule()
+         |> ensure_graphify_refresh_schemas_schedule()}
+      end
     rescue
       e -> {:error, Exception.message(e)}
     end
