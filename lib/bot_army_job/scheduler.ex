@@ -77,6 +77,9 @@ defmodule BotArmyJobScheduler.Scheduler do
   end
 
   defp due?(schedule, now) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    schedule_title = schedule_value(schedule, "title", :title)
+
     case schedule_value(schedule, "status", :status) do
       "active" ->
         case Crontab.CronExpression.Parser.parse(
@@ -88,10 +91,16 @@ defmodule BotArmyJobScheduler.Scheduler do
             due = Crontab.DateChecker.matches_date?(cron, now)
             not_recently_run = DateTime.diff(now, last_run, :second) >= 60
 
+            # Debug logging for companion jobs
+            if String.contains?(schedule_title, "Companion") do
+              Logger.info(
+                "[DUE_CHECK] #{schedule_title} (#{schedule_id}): due=#{due}, not_recently_run=#{not_recently_run}, seconds_since_last_run=#{DateTime.diff(now, last_run, :second)}"
+              )
+            end
+
             due and not_recently_run
 
           {:error, _} ->
-            schedule_id = schedule_value(schedule, "id", :id)
             cron_expression = schedule_value(schedule, "cron_expression", :cron_expression)
 
             Logger.warning(
