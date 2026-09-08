@@ -128,7 +128,7 @@ publish-release: release
 	TARBALL=job_scheduler-$$VERSION.tar.gz; \
 	echo "Version: $$VERSION"; \
 	echo "Creating release tarball..."; \
-	tar -czf "$$TARBALL" -C _build/prod/rel job_scheduler/; \
+	tar -czf "$$TARBALL" -C _build/prod/rel job_scheduler_bot/; \
 	echo "✓ Tarball created: $$TARBALL"; \
 	echo ""; \
 	echo "Creating GitHub release v$$VERSION..."; \
