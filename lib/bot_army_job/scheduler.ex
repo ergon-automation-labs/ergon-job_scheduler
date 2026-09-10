@@ -93,8 +93,10 @@ defmodule BotArmyJobScheduler.Scheduler do
 
             # Debug logging for companion jobs
             if String.contains?(schedule_title, "Companion") do
+              cron_expr = schedule_value(schedule, "cron_expression", :cron_expression)
+
               Logger.info(
-                "[DUE_CHECK] #{schedule_title} (#{schedule_id}): due=#{due}, not_recently_run=#{not_recently_run}, seconds_since_last_run=#{DateTime.diff(now, last_run, :second)}"
+                "[DUE_CHECK] #{schedule_title} (#{schedule_id}): cron=#{cron_expr}, now=#{DateTime.to_iso8601(now)}, due=#{due}, not_recently_run=#{not_recently_run}, seconds_since_last_run=#{DateTime.diff(now, last_run, :second)}"
               )
             end
 
