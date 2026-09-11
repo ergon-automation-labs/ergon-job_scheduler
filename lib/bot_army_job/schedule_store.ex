@@ -273,7 +273,16 @@ defmodule BotArmyJobScheduler.ScheduleStore do
                 "cron_expression" =>
                   Map.get(payload, "cron_expression", db_schedule.cron_expression),
                 "command" => Map.get(payload, "command", db_schedule.command),
-                "timeout" => Map.get(payload, "timeout", db_schedule.timeout)
+                "timeout" => Map.get(payload, "timeout", db_schedule.timeout),
+                # Persist last_run_at: the Scheduler calls update/2 with
+                # %{"last_run_at" => DateTime} after every run. Without this
+                # key the changeset silently dropped it and the DB column
+                # stayed NULL forever — no run history, and the scheduler's
+                # not_recently_run guard was always vacuously true.
+                "last_run_at" =>
+                  payload
+                  |> Map.get("last_run_at", db_schedule.last_run_at)
+                  |> cast_last_run_at()
               }
             )
 
@@ -979,12 +988,21 @@ defmodule BotArmyJobScheduler.ScheduleStore do
 
   defp ensure_companion_reflection_schedule(state) do
     if companion_reflection_enabled?() do
+      # The salt seed (bots/job_schedules.sls) stores the full shell command
+      # ("nats request --server nats://localhost:4222 companion.reflection '{}'")
+      # in the DB row, not the bare subject. Match on substring so the salt row
+      # is recognized — otherwise this seeder inserts a second, duplicate
+      # "Companion Reflection" row (bare subject) on every boot, which the
+      # Scheduler then runs as a shell job and fails with exit 127.
       has_schedule? =
         state
         |> Map.values()
         |> Enum.any?(fn schedule ->
-          schedule["command"] == @companion_reflection_command and
-            schedule["status"] in ["active", "paused"]
+          command = schedule["command"] || ""
+
+          schedule["status"] in ["active", "paused"] and
+            (command == @companion_reflection_command or
+               String.contains?(command, @companion_reflection_command))
         end)
 
       if has_schedule? do
@@ -1332,6 +1350,17 @@ defmodule BotArmyJobScheduler.ScheduleStore do
         state
     end
   end
+
+  # The Scheduler passes %DateTime{} (DateTime.utc_now/0) in the update payload,
+  # but the Ecto field is :naive_datetime. Normalize before cast so Ecto doesn't
+  # reject the change. Binaries (ISO8601) are left for Ecto's own cast.
+  defp cast_last_run_at(nil), do: nil
+
+  defp cast_last_run_at(%DateTime{} = dt), do: DateTime.to_naive(dt)
+
+  defp cast_last_run_at(%NaiveDateTime{} = ndt), do: ndt
+
+  defp cast_last_run_at(other), do: other
 
   defp schema_to_map(%BotArmyJobScheduler.Schemas.Schedule{} = schedule) do
     %{
