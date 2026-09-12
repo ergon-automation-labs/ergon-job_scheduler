@@ -57,6 +57,16 @@ defmodule BotArmyJobScheduler.Scheduler do
     Process.send_after(self(), :check_schedules, @check_interval_ms)
   end
 
+  # Per-schedule isolation wrapper — see the comment in check_and_run_due_schedules.
+  defp execute_schedule_safe(schedule) do
+    execute_schedule(schedule)
+  rescue
+    error ->
+      Logger.error(
+        "Error executing schedule #{schedule_value(schedule, "id", :id)}: #{inspect(error)}"
+      )
+  end
+
   defp check_and_run_due_schedules do
     try do
       now = DateTime.utc_now()
@@ -65,7 +75,11 @@ defmodule BotArmyJobScheduler.Scheduler do
         {:ok, schedules} ->
           schedules
           |> Enum.filter(&due?(&1, now))
-          |> Enum.each(&execute_schedule/1)
+          # Isolate each execution: a crash in one schedule must never abort the
+          # pass and silently skip every remaining due schedule (seen 2026-09-12
+          # 03:00 EEST — a FunctionClauseError during companion.heartbeat's reply
+          # handling skipped the companion reflection in the same minute).
+          |> Enum.each(&execute_schedule_safe/1)
 
         {:error, reason} ->
           Logger.error("Failed to list schedules: #{inspect(reason)}")
@@ -643,13 +657,26 @@ defmodule BotArmyJobScheduler.Scheduler do
 
     case safe_nats_request(subject, payload, timeout_ms) do
       {:ok, response} ->
-        ok? = get_in(response, ["ok"]) == true or get_in(response, ["status"]) == "success"
+        # Shape-safe: replies from any bot can be any JSON value. get_in on a
+        # non-map/non-list (e.g. a JSON string from a double-encoding replier)
+        # raises FunctionClauseError which used to escape and kill the WHOLE
+        # check pass — every schedule after the offender in the same minute was
+        # silently skipped (seen 2026-09-12 03:00 EEST with companion.heartbeat).
+        ok? =
+          is_map(response) and
+            (Map.get(response, "ok") == true or Map.get(response, "status") == "success")
 
         if ok? do
           Logger.info("Skill job #{schedule_id} completed successfully")
           :ok
         else
-          error = get_in(response, ["error"]) || "Unknown skill error"
+          error =
+            if is_map(response) do
+              Map.get(response, "error") || "Unknown skill error"
+            else
+              "Non-object reply: #{inspect(response, limit: 200)}"
+            end
+
           Logger.error("Skill job #{schedule_id} returned error: #{error}")
           {:error, {:skill_error, error}}
         end
