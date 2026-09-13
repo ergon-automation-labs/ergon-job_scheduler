@@ -14,6 +14,10 @@ defmodule BotArmyJobScheduler.Scheduler do
   @server __MODULE__
   # Check every minute
   @check_interval_ms 60_000
+  # A missed cron boundary is only fired if it is at most this old. Covers
+  # check-loop stalls (blocking jobs) and machine sleep without replaying a
+  # whole weekend of missed slots on wake.
+  @max_catchup_seconds 6 * 60 * 60
   @schema_sync_command "ops.schema_sync.run"
   @para_daily_changed_command "ops.para_daily_changed.run"
   @gtd_para_export_command "ops.gtd_para_export.run"
@@ -43,14 +47,19 @@ defmodule BotArmyJobScheduler.Scheduler do
   def init(_opts) do
     Logger.info("Starting JobScheduler - checking every #{@check_interval_ms}ms")
     schedule_check()
-    {:ok, %{}}
+    {:ok, %{running: MapSet.new()}}
   end
 
   @impl true
   def handle_info(:check_schedules, state) do
-    check_and_run_due_schedules()
+    running = check_and_run_due_schedules(state.running || MapSet.new())
     schedule_check()
-    {:noreply, state}
+    {:noreply, %{state | running: running}}
+  end
+
+  @impl true
+  def handle_call({:finish_run, schedule_id}, _from, state) do
+    {:reply, :ok, %{state | running: MapSet.delete(state.running || MapSet.new(), schedule_id)}}
   end
 
   defp schedule_check do
@@ -67,7 +76,12 @@ defmodule BotArmyJobScheduler.Scheduler do
       )
   end
 
-  defp check_and_run_due_schedules do
+  # Each due schedule executes in its own supervised task so a long-running job
+  # (youtube-dl ingest routinely blocks for hours) can never stall the check
+  # loop. Inline execution delayed every subsequent check past the exact cron
+  # minute and sparse schedules silently skipped their slots (all Companion
+  # slots missed 2026-09-12 12:00 UTC onward).
+  defp check_and_run_due_schedules(running) do
     try do
       now = DateTime.utc_now()
 
@@ -75,18 +89,40 @@ defmodule BotArmyJobScheduler.Scheduler do
         {:ok, schedules} ->
           schedules
           |> Enum.filter(&due?(&1, now))
-          # Isolate each execution: a crash in one schedule must never abort the
-          # pass and silently skip every remaining due schedule (seen 2026-09-12
-          # 03:00 EEST — a FunctionClauseError during companion.heartbeat's reply
-          # handling skipped the companion reflection in the same minute).
-          |> Enum.each(&execute_schedule_safe/1)
+          |> Enum.reduce(running, &spawn_execution/2)
 
         {:error, reason} ->
           Logger.error("Failed to list schedules: #{inspect(reason)}")
+          running
       end
     rescue
       error ->
         Logger.error("Error checking schedules: #{inspect(error)}")
+        running
+    end
+  end
+
+  defp spawn_execution(schedule, running) do
+    schedule_id = schedule_value(schedule, "id", :id)
+
+    if MapSet.member?(running, schedule_id) do
+      Logger.info("Skipping schedule #{schedule_id}: previous execution still in progress")
+      running
+    else
+      case Task.Supervisor.start_child(BotArmyJobScheduler.TaskSupervisor, fn ->
+             try do
+               execute_schedule_safe(schedule)
+             after
+               GenServer.call(@server, {:finish_run, schedule_id})
+             end
+           end) do
+        {:ok, _pid} ->
+          MapSet.put(running, schedule_id)
+
+        {:error, reason} ->
+          Logger.error("Failed to spawn execution for #{schedule_id}: #{inspect(reason)}")
+          running
+      end
     end
   end
 
@@ -100,9 +136,12 @@ defmodule BotArmyJobScheduler.Scheduler do
                schedule_value(schedule, "cron_expression", :cron_expression)
              ) do
           {:ok, cron} ->
-            # Check if the schedule is due to run
+            # Catch-up semantics: a slot is due when a cron boundary has passed
+            # since the last run and is still fresh (within @max_catchup_seconds).
+            # Exact-minute matching skipped slots whenever no check landed inside
+            # the precise cron minute (blocked check loop / machine sleep).
             last_run = parse_last_run(schedule_value(schedule, "last_run_at", :last_run_at), now)
-            due = Crontab.DateChecker.matches_date?(cron, now)
+            {due, boundary} = cron_due_since?(cron, last_run, now)
             not_recently_run = DateTime.diff(now, last_run, :second) >= 60
 
             # Debug logging for companion jobs
@@ -110,7 +149,7 @@ defmodule BotArmyJobScheduler.Scheduler do
               cron_expr = schedule_value(schedule, "cron_expression", :cron_expression)
 
               Logger.info(
-                "[DUE_CHECK] #{schedule_title} (#{schedule_id}): cron=#{cron_expr}, now=#{DateTime.to_iso8601(now)}, due=#{due}, not_recently_run=#{not_recently_run}, seconds_since_last_run=#{DateTime.diff(now, last_run, :second)}"
+                "[DUE_CHECK] #{schedule_title} (#{schedule_id}): cron=#{cron_expr}, now=#{DateTime.to_iso8601(now)}, due=#{due}, boundary=#{format_boundary(boundary)}, not_recently_run=#{not_recently_run}, seconds_since_last_run=#{DateTime.diff(now, last_run, :second)}"
               )
             end
 
@@ -1509,12 +1548,48 @@ defmodule BotArmyJobScheduler.Scheduler do
 
   defp parse_last_run(last_run, now) when is_binary(last_run) do
     case DateTime.from_iso8601(last_run) do
-      {:ok, datetime, _} -> datetime
-      _ -> DateTime.add(now, -1_000_000, :second)
+      {:ok, datetime, _} ->
+        datetime
+
+      _ ->
+        # schema_to_map emits NaiveDateTime.to_iso8601/1, which carries no UTC
+        # offset ("2026-09-12T08:47:00"); DateTime.from_iso8601 rejects it and
+        # every cached last_run_at degraded to the never-run sentinel.
+        case NaiveDateTime.from_iso8601(last_run) do
+          {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
+          _ -> DateTime.add(now, -1_000_000, :second)
+        end
     end
   end
 
   defp parse_last_run(_, now), do: DateTime.add(now, -1_000_000, :second)
+
+  # Fire a missed cron boundary once: the most recent occurrence before `now`
+  # must be newer than the last run and no older than @max_catchup_seconds.
+  defp cron_due_since?(cron, last_run, now) do
+    case Crontab.Scheduler.get_previous_run_date(cron, DateTime.to_naive(now)) do
+      {:ok, prev_naive} ->
+        prev = DateTime.from_naive!(prev_naive, "Etc/UTC")
+
+        due =
+          DateTime.compare(prev, last_run) == :gt and
+            DateTime.diff(now, prev, :second) <= @max_catchup_seconds
+
+        {due, prev}
+
+      {:error, _reason} ->
+        {false, nil}
+    end
+  rescue
+    _ -> {false, nil}
+  end
+
+  @doc false
+  def schedule_due?(schedule, now \\ DateTime.utc_now()) when is_map(schedule),
+    do: due?(schedule, now)
+
+  defp format_boundary(nil), do: "none"
+  defp format_boundary(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp schedule_value(schedule, string_key, atom_key) do
     cond do

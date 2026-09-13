@@ -1373,7 +1373,7 @@ defmodule BotArmyJobScheduler.ScheduleStore do
       "status" => schedule.status,
       "last_run_at" =>
         if(schedule.last_run_at,
-          do: schedule.last_run_at |> NaiveDateTime.to_iso8601(),
+          do: schedule.last_run_at |> NaiveDateTime.to_iso8601() |> Kernel.<>("Z"),
           else: nil
         ),
       "created_at" => schedule.inserted_at |> NaiveDateTime.to_iso8601(),

@@ -37,7 +37,11 @@ defmodule BotArmyJobScheduler.Application do
     if @env == :test do
       children
     else
-      [{BotArmyJobScheduler.PulsePublisher, []}, {BotArmyJobScheduler.Scheduler, []} | children]
+      [
+        {Task.Supervisor, name: BotArmyJobScheduler.TaskSupervisor},
+        {BotArmyJobScheduler.PulsePublisher, []},
+        {BotArmyJobScheduler.Scheduler, []} | children
+      ]
     end
   end
 
