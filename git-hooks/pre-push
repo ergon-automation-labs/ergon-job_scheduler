@@ -1,86 +1,105 @@
 #!/bin/bash
-# Lightweight git pre-push hook for Bot Army bots
-# Keep push fast/reliable: run quick local validation only.
+# Bot Army pre-push hook — canonical copy lives at scripts/bot-helpers/pre-push.
+#
+# Install it in a repo with `make sync-hook` (which copies this file over
+# git-hooks/pre-push and refuses to report success unless the file changed).
+#
+# What it does, in order:
+#   1. feature branch, or first push to main  → nothing to validate yet
+#   2. only git-hooks/ changed                → nothing to validate
+#   3. a mix project (mix.exs with `def project`) → hex + deps + compile + test
+#   4. no mix project but a `check:` target   → make check   (schema repos)
+#   5. neither                                → say so, let the push through
+#
+# It finds `mix` on the machine it runs on. It used to end its search with one
+# developer's absolute shim path (/Users/abby/...), so on any other machine —
+# staging, CI, a teammate's laptop — the last resort was a path that cannot
+# exist, and the push aborted with a "No such file or directory" from the very
+# gate meant to protect it. Resolution order mirrors scripts/bot-helpers/portable.mk.
 
 set -e
 
-# Find mix: env override → mise → PATH → fallback
-MIX_BIN="${MIX_BIN:-}"
-if [ -z "$MIX_BIN" ]; then
-  if command -v mise &>/dev/null; then
-    MIX_BIN="$(mise which mix 2>/dev/null || true)"
-  fi
-fi
-if [ -z "$MIX_BIN" ]; then
-  MIX_BIN="$(command -v mix 2>/dev/null || true)"
-fi
-if [ -z "$MIX_BIN" ]; then
-  MIX_BIN="/Users/abby/.local/share/mise/shims/mix"
-fi
-
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-export HEX_HOME="$REPO_ROOT/.cache/hex"
-export MIX_HOME="$REPO_ROOT/.cache/mix"
-mkdir -p "$HEX_HOME" "$MIX_HOME"
 
-echo "🔍 Running pre-push checks..."
-echo ""
-echo "⏱️  This may take 2-5 minutes (compilation + tests)"
-echo "⚠️  Do NOT interrupt with --no-verify — hooks are safety gates"
-echo ""
+find_mix() {
+  if [ -n "${MIX_BIN:-}" ] && [ -x "${MIX_BIN}" ]; then printf '%s' "${MIX_BIN}"; return 0; fi
+  if command -v mix >/dev/null 2>&1; then command -v mix; return 0; fi
+  if command -v mise >/dev/null 2>&1; then
+    local m
+    m="$(mise which mix 2>/dev/null || true)"
+    if [ -n "$m" ] && [ -x "$m" ]; then printf '%s' "$m"; return 0; fi
+  fi
+  local cand
+  for cand in "${MIX_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims/mix" \
+              "$HOME/.asdf/shims/mix" \
+              /opt/homebrew/bin/mix /usr/local/bin/mix \
+              "$HOME/.local/bin/mix" "$HOME/.mix/escripts/mix"; do
+    if [ -x "$cand" ]; then printf '%s' "$cand"; return 0; fi
+  done
+  return 1
+}
 
 push_to_main=0
-main_remote_oid=""
-while read -r local_ref local_oid remote_ref remote_oid; do
-  if [[ $remote_ref == "refs/heads/main" ]]; then
+local_oid=""
+remote_oid=""
+while read -r l_ref l_oid r_ref r_oid; do
+  if [[ $r_ref == "refs/heads/main" ]]; then
     push_to_main=1
-    # Capture on the matching line: the loop's final EOF read resets its
-    # own vars to empty, so a bare "$remote_oid" would always be blank here.
-    main_remote_oid="$remote_oid"
+    local_oid="$l_oid"
+    # Capture on the matching line: the loop's final EOF read resets its own
+    # vars to empty, so a bare "$r_oid" would always be blank here.
+    remote_oid="$r_oid"
   fi
 done
-remote_oid="$main_remote_oid"
 
-if [[ $push_to_main -eq 1 ]]; then
-  # Skip validation on first push (remote is empty)
-  if [[ -z "$remote_oid" ]]; then
-    echo "ℹ️  First push to main - skipping validation"
-    echo ""
-    exit 0
-  fi
-  echo "⚠️  Pushing to main branch - running fast validation only..."
-  echo ""
-
-  echo "📦 Ensuring Hex + dependencies..."
-  "$MIX_BIN" local.hex --force || {
-    echo "❌ mix local.hex failed - push aborted"
-    exit 1
-  }
-  "$MIX_BIN" deps.get --force || {
-    echo "❌ mix deps.get failed - push aborted"
-    exit 1
-  }
-  echo ""
-
-  echo "🔨 Compiling code..."
-  "$MIX_BIN" compile --force || {
-    echo "❌ Compilation failed - push aborted"
-    exit 1
-  }
-
-  echo ""
-  echo "🧪 Running tests..."
-  "$MIX_BIN" test || {
-    echo "❌ Tests failed - push aborted"
-    exit 1
-  }
-
-  echo ""
-  echo "✅ Pre-push checks passed"
-  echo "ℹ️  Publish releases explicitly with: make push-and-publish"
-else
-  echo "ℹ️  Pushing to feature branch - skipping pre-push validation"
+if [[ $push_to_main -ne 1 ]]; then
+  echo "ℹ️  Feature branch — nothing to validate."
+  exit 0
 fi
 
-echo ""
+# git reports a brand-new branch with 40 zeros, not an empty string — the old
+# `-z` test never once matched, so "first push" was dead code.
+if [ -z "$remote_oid" ] || [ -z "${remote_oid//0/}" ]; then
+  echo "ℹ️  First push to main — nothing to validate yet."
+  exit 0
+fi
+
+# Validate what is actually being pushed. If `git diff` fails, or prints
+# nothing, we cannot tell what changed — and an empty answer is not evidence
+# that only the hook moved, so the gate runs. Skipping here must require a
+# non-empty list whose every entry is under git-hooks/.
+changed="$(git diff --name-only "$remote_oid" "$local_oid" 2>/dev/null || true)"
+if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qv '^git-hooks/'; then
+  echo "ℹ️  Only git-hooks/ changed — no code to validate."
+  exit 0
+fi
+
+if [ -f "$REPO_ROOT/mix.exs" ] && grep -q "def project" "$REPO_ROOT/mix.exs" 2>/dev/null; then
+  if ! MIX_BIN="$(find_mix)"; then
+    echo "❌ Cannot find \`mix\` on this machine — refusing to pretend the gate ran."
+    echo "   Set MIX_BIN, put mix on PATH, or install it with mise."
+    exit 1
+  fi
+  export HEX_HOME="$REPO_ROOT/.cache/hex"
+  export MIX_HOME="$REPO_ROOT/.cache/mix"
+  mkdir -p "$HEX_HOME" "$MIX_HOME"
+  echo "🔍 Pre-push: mix local.hex + deps.get + compile + test (2-5 minutes)"
+  echo "⚠️  This is a safety gate — do not reach for --no-verify."
+  "$MIX_BIN" local.hex --force || { echo "❌ mix local.hex failed — push aborted"; exit 1; }
+  "$MIX_BIN" deps.get --force   || { echo "❌ mix deps.get failed — push aborted"; exit 1; }
+  "$MIX_BIN" compile --force    || { echo "❌ Compilation failed — push aborted"; exit 1; }
+  "$MIX_BIN" test               || { echo "❌ Tests failed — push aborted"; exit 1; }
+  echo "✅ Mix checks passed"
+  echo "ℹ️  Publish releases explicitly with: make push-and-publish"
+  exit 0
+fi
+
+if [ -f "$REPO_ROOT/Makefile" ] && grep -q '^check:' "$REPO_ROOT/Makefile"; then
+  echo "🔍 Pre-push: make check"
+  (cd "$REPO_ROOT" && make check) || { echo "❌ make check failed — push aborted"; exit 1; }
+  echo "✅ Checks passed"
+  exit 0
+fi
+
+echo "ℹ️  No mix project and no \`check\` target here — nothing to validate."
 exit 0
