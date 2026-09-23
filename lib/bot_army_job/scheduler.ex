@@ -47,33 +47,89 @@ defmodule BotArmyJobScheduler.Scheduler do
   def init(_opts) do
     Logger.info("Starting JobScheduler - checking every #{@check_interval_ms}ms")
     schedule_check()
-    {:ok, %{running: MapSet.new()}}
+    {:ok, %{running: %{}, failures: %{}}}
   end
 
   @impl true
   def handle_info(:check_schedules, state) do
-    running = check_and_run_due_schedules(state.running || MapSet.new())
+    state = check_and_run_due_schedules(state)
     schedule_check()
-    {:noreply, %{state | running: running}}
+    {:noreply, state}
+  end
+
+  # The run's Task is monitored, so the in-flight entry is released on ANY exit —
+  # normal completion, crash, or kill. Before this, the entry was released by a
+  # `GenServer.call(@server, {:finish_run, …})` from the Task: a busy scheduler
+  # (a long ScheduleStore.list/0 database call) made that call time out after 5s,
+  # killing the Task before it could release the entry. The schedule was then
+  # skipped forever — a silently stuck schedule.
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    case Enum.find(state.running, fn {_id, run} -> run.ref == ref end) do
+      {schedule_id, _run} ->
+        if reason not in [:normal, :shutdown] do
+          Logger.error("Run for schedule #{schedule_id} exited abnormally: #{inspect(reason)}")
+        end
+
+        {:noreply, %{state | running: Map.delete(state.running, schedule_id)}}
+
+      nil ->
+        {:noreply, state}
+    end
   end
 
   @impl true
-  def handle_call({:finish_run, schedule_id}, _from, state) do
-    {:reply, :ok, %{state | running: MapSet.delete(state.running || MapSet.new(), schedule_id)}}
+  def handle_cast({:run_finished, schedule_id, outcome}, state) do
+    {:noreply, %{state | failures: track_failure(state.failures, schedule_id, outcome)}}
+  end
+
+  @doc """
+  Diagnostic snapshot for operators and health checks: what is in flight right
+  now, and how many attempts in a row each failing schedule has made.
+  """
+  def status do
+    GenServer.call(@server, :status)
+  end
+
+  @impl true
+  def handle_call(:status, _from, state) do
+    running =
+      Map.new(state.running, fn {id, run} -> {id, %{started_at: run.started_at}} end)
+
+    {:reply, %{running: running, failures: state.failures}, state}
   end
 
   defp schedule_check do
     Process.send_after(self(), :check_schedules, @check_interval_ms)
   end
 
+  # Consecutive failures per schedule. A job that has failed three times in a row
+  # is a real problem, not noise — say so instead of only printing the same error
+  # every cron boundary. Reset on success.
+  defp track_failure(failures, schedule_id, :ok), do: Map.delete(failures, schedule_id)
+
+  defp track_failure(failures, schedule_id, {:error, reason}) do
+    count = Map.get(failures, schedule_id, 0) + 1
+
+    if count in [3, 10, 25] do
+      Logger.warning(
+        "Schedule #{schedule_id} has failed #{count} times in a row: #{inspect(reason)}"
+      )
+    end
+
+    Map.put(failures, schedule_id, count)
+  end
+
+  defp track_failure(failures, _schedule_id, _other), do: failures
+
   # Per-schedule isolation wrapper — see the comment in check_and_run_due_schedules.
   defp execute_schedule_safe(schedule) do
     execute_schedule(schedule)
   rescue
     error ->
-      Logger.error(
-        "Error executing schedule #{schedule_value(schedule, "id", :id)}: #{inspect(error)}"
-      )
+      schedule_id = schedule_value(schedule, "id", :id)
+      Logger.error("Error executing schedule #{schedule_id}: #{inspect(error)}")
+      {:error, {:exception, error}}
   end
 
   # Each due schedule executes in its own supervised task so a long-running job
@@ -81,7 +137,7 @@ defmodule BotArmyJobScheduler.Scheduler do
   # loop. Inline execution delayed every subsequent check past the exact cron
   # minute and sparse schedules silently skipped their slots (all Companion
   # slots missed 2026-09-12 12:00 UTC onward).
-  defp check_and_run_due_schedules(running) do
+  defp check_and_run_due_schedules(state) do
     try do
       now = DateTime.utc_now()
 
@@ -89,40 +145,50 @@ defmodule BotArmyJobScheduler.Scheduler do
         {:ok, schedules} ->
           schedules
           |> Enum.filter(&due?(&1, now))
-          |> Enum.reduce(running, &spawn_execution/2)
+          |> Enum.reduce(state, &spawn_execution/2)
 
         {:error, reason} ->
           Logger.error("Failed to list schedules: #{inspect(reason)}")
-          running
+          state
       end
     rescue
       error ->
         Logger.error("Error checking schedules: #{inspect(error)}")
-        running
+        state
     end
   end
 
-  defp spawn_execution(schedule, running) do
+  defp spawn_execution(schedule, state) do
     schedule_id = schedule_value(schedule, "id", :id)
 
-    if MapSet.member?(running, schedule_id) do
-      Logger.info("Skipping schedule #{schedule_id}: previous execution still in progress")
-      running
-    else
-      case Task.Supervisor.start_child(BotArmyJobScheduler.TaskSupervisor, fn ->
-             try do
-               execute_schedule_safe(schedule)
-             after
-               GenServer.call(@server, {:finish_run, schedule_id})
-             end
-           end) do
-        {:ok, _pid} ->
-          MapSet.put(running, schedule_id)
+    case Map.get(state.running, schedule_id) do
+      %{started_at: started_at} ->
+        # Single-flight: a run that is still alive owns the schedule. Bounded by
+        # BoundedCommand's deadline, so this cannot stay true forever.
+        Logger.warning(
+          "Skipping schedule #{schedule_id}: run started #{DateTime.to_iso8601(started_at)} is still in progress"
+        )
 
-        {:error, reason} ->
-          Logger.error("Failed to spawn execution for #{schedule_id}: #{inspect(reason)}")
-          running
-      end
+        state
+
+      nil ->
+        start_run(schedule, schedule_id, state)
+    end
+  end
+
+  defp start_run(schedule, schedule_id, state) do
+    case Task.Supervisor.start_child(BotArmyJobScheduler.TaskSupervisor, fn ->
+           outcome = execute_schedule_safe(schedule)
+           GenServer.cast(@server, {:run_finished, schedule_id, outcome})
+         end) do
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
+        run = %{pid: pid, ref: ref, started_at: DateTime.utc_now()}
+        %{state | running: Map.put(state.running, schedule_id, run)}
+
+      {:error, reason} ->
+        Logger.error("Failed to spawn execution for #{schedule_id}: #{inspect(reason)}")
+        state
     end
   end
 
@@ -174,17 +240,52 @@ defmodule BotArmyJobScheduler.Scheduler do
     schedule_id = schedule_value(schedule, "id", :id)
     schedule_title = schedule_value(schedule, "title", :title)
     Logger.info("Executing schedule #{schedule_id}: #{schedule_title}")
+    started_ms = System.monotonic_time(:millisecond)
 
-    case run_schedule_command(schedule) do
-      :ok ->
-        # Update last_run_at in the store and database
-        payload = %{"last_run_at" => DateTime.utc_now()}
-        BotArmyJobScheduler.ScheduleStore.update(schedule_id, payload)
-        Logger.info("Schedule #{schedule_id} executed successfully")
+    outcome =
+      case run_schedule_command(schedule) do
+        :ok -> :ok
+        {:error, reason} -> {:error, reason}
+        other -> {:error, {:unexpected_outcome, other}}
+      end
+
+    record_attempt(schedule, outcome, System.monotonic_time(:millisecond) - started_ms)
+  end
+
+  # The attempt is recorded whether it succeeded or failed.
+  #
+  # last_run_at used to be written only on success, so a permanently failing job
+  # (the PARA export pointed at a wedged iCloud tree, 2026-09-22) stayed *due* and
+  # was retried on every 60s check instead of at its next cron boundary — the
+  # retry loop that fed the 11-day process runaway. Recording the attempt does not
+  # hide the failure: the error is logged here and counted by handle_cast/2's
+  # consecutive-failure tracker.
+  defp record_attempt(schedule, outcome, elapsed_ms) do
+    schedule_id = schedule_value(schedule, "id", :id)
+    schedule_title = schedule_value(schedule, "title", :title)
+    now = DateTime.utc_now()
+
+    case BotArmyJobScheduler.ScheduleStore.update(schedule_id, %{"last_run_at" => now}) do
+      {:ok, _} ->
+        :ok
 
       {:error, reason} ->
-        Logger.error("Failed to execute schedule #{schedule_id}: #{inspect(reason)}")
+        Logger.error(
+          "Failed to record attempt for schedule #{schedule_id} (last_run_at=#{DateTime.to_iso8601(now)}): #{inspect(reason)}"
+        )
     end
+
+    case outcome do
+      :ok ->
+        Logger.info("Schedule #{schedule_id} (#{schedule_title}) succeeded in #{elapsed_ms}ms")
+
+      {:error, reason} ->
+        Logger.error(
+          "Schedule #{schedule_id} (#{schedule_title}) failed after #{elapsed_ms}ms: #{inspect(reason)}"
+        )
+    end
+
+    outcome
   end
 
   defp run_schedule_command(schedule) do
@@ -1313,26 +1414,36 @@ defmodule BotArmyJobScheduler.Scheduler do
     e -> {:error, {:exception, e}}
   end
 
+  # Delegates to BoundedCommand, which guarantees the OS process tree is dead when
+  # the deadline expires. The previous implementation killed only the BEAM process
+  # owning the port, orphaning `make`/`sh`/`python3` children — see the module doc
+  # in bounded_command.ex and KNOWN_ISSUE_JOB_SCHEDULER_RUNAWAY_AND_MINION_WEDGE.
   defp make_cmd(args, opts, timeout_ms) when is_list(args) and is_list(opts) do
-    # System.cmd/3 has no :timeout option (raises ArgumentError). Run the make
-    # target in an unlinked process and bound it with a timed receive + kill.
-    parent = self()
-    ref = make_ref()
+    case System.find_executable("make") do
+      nil ->
+        Logger.error("[make_cmd] `make` is not on PATH (args=#{inspect(args)})")
+        {"make: executable not found", :timeout}
 
-    pid =
-      spawn(fn ->
-        send(parent, {ref, System.cmd("make", args, opts)})
-      end)
-
-    receive do
-      {^ref, result} ->
-        result
-    after
-      timeout_ms ->
-        Process.exit(pid, :kill)
-        Logger.error("[make_cmd] timed out after #{timeout_ms}ms (args=#{inspect(args)})")
-        {"", :timeout}
+      executable ->
+        run_command(executable, args, opts, timeout_ms, "[make_cmd]")
     end
+  end
+
+  defp run_command(executable, args, opts, timeout_ms, label) do
+    command_opts = [timeout_ms: timeout_ms] ++ Keyword.take(opts, [:cd, :env])
+
+    case BotArmyJobScheduler.BoundedCommand.run(executable, args, command_opts) do
+      {_output, :timeout} = result ->
+        Logger.error("#{label} timed out after #{timeout_ms}ms (args=#{inspect(args)})")
+        result
+
+      result ->
+        result
+    end
+  rescue
+    error ->
+      Logger.error("#{label} raised: #{inspect(error)} (args=#{inspect(args)})")
+      {"", :timeout}
   end
 
   defp safe_nats_request(subject, payload, timeout_ms) do
@@ -1368,8 +1479,8 @@ defmodule BotArmyJobScheduler.Scheduler do
   defp parse_nats_request_subject(_), do: nil
 
   # Salt-seeded schedules may carry raw shell commands (cd ... && make ...,
-  # python3 scripts). Execute them with a bounded child process, mirroring
-  # make_cmd/3 — System.cmd/3 has no :timeout option.
+  # python3 scripts). Execute them through BoundedCommand so the whole child tree
+  # is terminated on timeout, not just the shell that owns the port.
   defp run_shell_job(schedule) do
     schedule_id = schedule_value(schedule, "id", :id)
     command = schedule_value(schedule, "command", :command)
@@ -1377,36 +1488,36 @@ defmodule BotArmyJobScheduler.Scheduler do
 
     Logger.info("Running shell job #{schedule_id}: #{command}")
 
-    parent = self()
-    ref = make_ref()
-
-    pid =
-      spawn(fn ->
-        send(parent, {ref, System.cmd("bash", ["-c", command], stderr_to_stdout: true)})
-      end)
-
-    receive do
-      {^ref, {output, 0}} ->
+    case BotArmyJobScheduler.BoundedCommand.run("/bin/bash", ["-c", command],
+           timeout_ms: timeout_ms
+         ) do
+      {output, 0} ->
         Logger.info(
           "Shell job #{schedule_id} completed: #{String.slice(String.trim(output), 0, 300)}"
         )
 
         :ok
 
-      {^ref, {output, exit_code}} ->
+      {output, :timeout} ->
+        Logger.error(
+          "Shell job #{schedule_id} timed out after #{timeout_ms}ms (process tree terminated): " <>
+            String.slice(String.trim(output), 0, 300)
+        )
+
+        {:error, {:shell_timeout, timeout_ms}}
+
+      {output, exit_code} ->
         Logger.error(
           "Shell job #{schedule_id} exited #{exit_code}: #{String.slice(String.trim(output), 0, 500)}"
         )
 
         {:error, {:shell_exit, exit_code}}
-    after
-      timeout_ms ->
-        Process.exit(pid, :kill)
-
-        Logger.error("Shell job #{schedule_id} timed out after #{timeout_ms}ms")
-
-        {:error, {:shell_timeout, timeout_ms}}
     end
+  rescue
+    error ->
+      rescue_schedule_id = schedule_value(schedule, "id", :id) || "unknown"
+      Logger.error("Shell job #{rescue_schedule_id} raised: #{inspect(error)}")
+      {:error, {:shell_exception, error}}
   end
 
   defp publish_schedule_event(schedule) do
