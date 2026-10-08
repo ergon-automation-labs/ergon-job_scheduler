@@ -132,11 +132,13 @@ publish-release: release
 	else \
 		gh release create "v$$VERSION" "$$TARBALL" \
 			--title "Release v$$VERSION" \
-			--notes "Job Scheduler Bot Elixir release v$$VERSION. Download and deploy with Jenkins." \
+			--notes "Job Scheduler Bot Elixir release v$$VERSION." \
 			--draft=false; \
 	fi; \
 	echo "✓ Release published to GitHub"; \
 	echo "" 
+
+	@$(MAKE) publish-deploy-event TARGET=air
 deploy: release
 	@echo "==============================================="
 	@echo "Deploying release locally via Salt"
