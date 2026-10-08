@@ -6,10 +6,20 @@
 #
 # What it does, in order:
 #   1. feature branch, or first push to main  → nothing to validate yet
-#   2. only git-hooks/ changed                → nothing to validate
-#   3. a mix project (mix.exs with `def project`) → hex + deps + compile + test
-#   4. no mix project but a `check:` target   → make check   (schema repos)
-#   5. neither                                → say so, let the push through
+#   2. `--is-tooling-only <base> <head>`     → query mode, see below
+#   3. only git-hooks/ changed               → nothing to validate
+#   4. only build plumbing changed           → nothing to validate
+#   5. a mix project (mix.exs with `def project`) → hex + deps + compile + test
+#   6. no mix project but a `check:` target   → make check   (schema repos)
+#   7. neither                                → say so, let the push through
+#
+# Build plumbing is the set of paths in is_tooling_path() below. The skip is
+# decided from the diff git is actually pushing — not from a file the pusher
+# wrote — so `make push-tooling` cannot be used to smuggle a code change past
+# the gate: the hook re-derives the answer and runs the full gate regardless.
+#
+# `make push-tooling` calls this hook in query mode rather than re-listing the
+# paths itself. One allowlist, in one file; a second copy would drift.
 #
 # It finds `mix` on the machine it runs on. It used to end its search with one
 # developer's absolute shim path (/Users/abby/...), so on any other machine —
@@ -20,6 +30,57 @@
 set -e
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ---------------------------------------------------------------------------
+# Build plumbing: paths whose change cannot alter what the software does.
+# Deliberately narrow. Docs and .pi/ are safe too, but "safe" is not the bar —
+# the bar is "cannot change the artifact", and an allowlist that gets argued
+# wider over time stops being a gate.
+is_tooling_path() {
+  case "$1" in
+    Makefile|Jenkinsfile) return 0 ;;
+    *.mk|make/*|git-hooks/*|.github/workflows/*|scripts/bot-helpers/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints every changed path that is NOT build plumbing; no output means the
+# change is tooling-only. Empty *input* is not proof of anything, so this
+# returns non-zero for it and every caller must treat that as "gate runs".
+non_tooling_paths() {
+  local base="$1" head="$2" changed f
+  changed="$(git diff --name-only "$base" "$head" 2>/dev/null || true)"
+  [ -n "$changed" ] || return 1
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    is_tooling_path "$f" || printf '%s\n' "$f"
+  done <<< "$changed"
+}
+
+# Query mode, called by `make push-tooling`:
+#   git-hooks/pre-push --is-tooling-only <base> <head>
+# Exits 0 only if every path changed between <base> and <head> is build
+# plumbing, and prints those paths. Keeping the allowlist in this file is the
+# point: a copy in the Makefile would drift from it.
+if [ "${1:-}" = "--is-tooling-only" ]; then
+  base="${2:-}"
+  head="${3:-}"
+  if [ -z "$base" ] || [ -z "$head" ]; then
+    echo "usage: pre-push --is-tooling-only <base> <head>" >&2
+    exit 2
+  fi
+  if offenders="$(non_tooling_paths "$base" "$head")" && [ -z "$offenders" ]; then
+    # The sentinel is the handshake, and it is why this cannot fail open. An
+    # older hook has no query mode at all: invoked with these arguments it runs
+    # its normal flow, finds no stdin, and exits 0 for "feature branch". A
+    # bare exit-code check would read that as approval. `make push-tooling`
+    # therefore requires this exact line and refuses without it.
+    echo "BOT_ARMY_TOOLING_ONLY_V1"
+    git diff --name-only "$base" "$head"
+    exit 0
+  fi
+  exit 1
+fi
 
 find_mix() {
   if [ -n "${MIX_BIN:-}" ] && [ -x "${MIX_BIN}" ]; then printf '%s' "${MIX_BIN}"; return 0; fi
@@ -71,6 +132,19 @@ fi
 changed="$(git diff --name-only "$remote_oid" "$local_oid" 2>/dev/null || true)"
 if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qv '^git-hooks/'; then
   echo "ℹ️  Only git-hooks/ changed — no code to validate."
+  exit 0
+fi
+
+# Build plumbing only. Decided from the diff git is actually pushing, never
+# from a proof file — which is what stops `make push-tooling` from being a way
+# around the gate. If the pusher claims "tooling" and the diff says otherwise,
+# the diff wins and the full gate runs below.
+if offenders="$(non_tooling_paths "$remote_oid" "$local_oid")" && [ -z "$offenders" ]; then
+  echo "ℹ️  Build plumbing only — none of this can change the code:"
+  printf '%s\n' "$changed" | while IFS= read -r f; do
+    [ -n "$f" ] && echo "     $f"
+  done
+  echo "     Changes under lib/, test/, config/, priv/ or mix.exs still run the full gate."
   exit 0
 fi
 
