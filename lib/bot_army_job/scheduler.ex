@@ -1663,9 +1663,13 @@ defmodule BotArmyJobScheduler.Scheduler do
         datetime
 
       _ ->
-        # schema_to_map emits NaiveDateTime.to_iso8601/1, which carries no UTC
-        # offset ("2026-09-12T08:47:00"); DateTime.from_iso8601 rejects it and
-        # every cached last_run_at degraded to the never-run sentinel.
+        # The producer now names the zone, so this branch only serves a last_run_at written
+        # before that fix -- by an older release, or by a value cached ahead of the rollout.
+        # It used to be the common case: schema_to_map emitted NaiveDateTime.to_iso8601/1,
+        # which carries no UTC offset ("2026-09-12T08:47:00"); DateTime.from_iso8601/1
+        # rejects that, so every cached last_run_at degraded to the never-run sentinel and
+        # the scheduler re-ran jobs it had already run. Keeping the branch keeps those rows
+        # readable across the upgrade.
         case NaiveDateTime.from_iso8601(last_run) do
           {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
           _ -> DateTime.add(now, -1_000_000, :second)
