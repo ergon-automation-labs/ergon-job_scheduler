@@ -1373,11 +1373,11 @@ defmodule BotArmyJobScheduler.ScheduleStore do
       "status" => schedule.status,
       "last_run_at" =>
         if(schedule.last_run_at,
-          do: schedule.last_run_at |> NaiveDateTime.to_iso8601() |> Kernel.<>("Z"),
+          do: schedule.last_run_at |> BotArmyLibraryRuntime.Timestamp.utc_iso8601(),
           else: nil
         ),
-      "created_at" => schedule.inserted_at |> NaiveDateTime.to_iso8601(),
-      "updated_at" => schedule.updated_at |> NaiveDateTime.to_iso8601()
+      "created_at" => schedule.inserted_at |> BotArmyLibraryRuntime.Timestamp.utc_iso8601(),
+      "updated_at" => schedule.updated_at |> BotArmyLibraryRuntime.Timestamp.utc_iso8601()
     }
   end
 
